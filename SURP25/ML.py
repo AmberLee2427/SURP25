@@ -173,8 +173,10 @@ class TwoLens1S:
         self.q = q
         self.s = s
         self.alpha = alpha
-        self.t = np.linspace(t0 - tE, t0 + tE, 100)
-        self.tau = (self.t - t0) / tE
+        self.tau = np.linspace(-4, 4, 200)
+        self.t = self.t0 + self.tau * self.tE
+        self.theta = np.radians(self.alpha)
+
         self.VBM = VBMicrolensing.VBMicrolensing()
         self.VBM.RelTol = 1e-3
         self.VBM.Tol = 1e-3
@@ -185,10 +187,11 @@ class TwoLens1S:
     def _prepare_systems(self):
         systems = []
         for u0, color in zip(self.u0_list, self.colors):
-            pr = [math.log(self.s), math.log(self.q), u0, self.alpha, math.log(self.rho), math.log(self.tE), self.t0]
+            pr = [math.log(self.s), math.log(self.q), u0, self.theta, math.log(self.rho), math.log(self.tE), self.t0]
             mag, cent_x, cent_y = self.VBM.BinaryLightCurve(pr, self.t)
-            x_src = self.tau * np.cos(self.alpha)
-            y_src = np.full_like(self.tau, u0) * np.sin(self.alpha)
+            x_src = self.tau * np.cos(self.theta) - u0 * np.sin(self.theta)
+            y_src = self.tau * np.sin(self.theta) + u0 * np.cos(self.theta)
+
             systems.append({
                 'u0': u0,
                 'color': color,
@@ -227,33 +230,57 @@ class TwoLens1S:
         source_dots, centroid_dots = [], []
         for system in self.systems:
             ax1.plot(system['x_src'], system['y_src'], '--', color=system['color'], alpha=0.4)
-            src_dot, = ax1.plot([], [], 'o', color=system['color'], markersize=6)
+            src_dot, = ax1.plot([], [], '*', color=system['color'], markersize=6)
             #cen_dot, = ax1.plot([], [], 'x', color=system['color'], markersize=6, label=f"$u_0$ = {system['u0']}")
             source_dots.append(src_dot)
             #centroid_dots.append(cen_dot)
         ax1.legend(loc='lower right')
 
         
-        ax2.set_xlim(self.t[0], self.t[-1])
+        ax2.set_xlim(self.tau[0], self.tau[-1])
         all_mag = np.concatenate([s['mag'] for s in self.systems])
         ax2.set_ylim(min(all_mag)*0.95, max(all_mag)*1.05)
-        ax2.set_xlabel("Time")
+        ax2.set_xlabel(r"Time ($\tau$)")
         ax2.set_ylabel("Magnification")
         ax2.set_title("Light Curve")
 
         tracer_dots = []
         for system in self.systems:
-            ax2.plot(self.t, system['mag'], color=system['color'], label=f"$u_0$ = {system['u0']}")
+            ax2.plot(self.tau, system['mag'], color=system['color'], label=f"$u_0$ = {system['u0']}")
             dot, = ax2.plot([], [], 'o', color=system['color'], markersize=6)
             tracer_dots.append(dot)
         ax2.legend()
 
+        image_dots = []
+        for system in self.systems:
+            system_dots = []
+            for _ in range(5): 
+                img_dot, = ax1.plot([], [], '.', color=system['color'], alpha=0.6, markersize=4)
+                system_dots.append(img_dot)
+            image_dots.append(system_dots)
+
         def update(i):
+            artists = []
             for j, system in enumerate(self.systems):
-                source_dots[j].set_data([system['x_src'][i]], [system['y_src'][i]])
-                #centroid_dots[j].set_data([system['cent_x'][i]], [system['cent_y'][i]])
-                tracer_dots[j].set_data([self.t[i]], [system['mag'][i]])
-            return source_dots + tracer_dots
+                x_src = system['x_src'][i]
+                y_src = system['y_src'][i]
+
+                source_dots[j].set_data([x_src], [y_src])
+                tracer_dots[j].set_data([self.tau[i]], [system['mag'][i]])
+                artists.extend([source_dots[j], tracer_dots[j]])
+                
+                images = self.VBM.ImageContours(self.s, self.q, x_src, y_src, self.rho)
+
+                for k, img_dot in enumerate(image_dots[j]):
+                    if k < len(images):
+                        img_dot.set_data(images[k][0], images[k][1])
+                        img_dot.set_alpha(0.6)
+                    else:
+                        img_dot.set_data([], [])
+                        img_dot.set_alpha(0)
+                    artists.append(img_dot)
+
+            return artists
 
         ani = animation.FuncAnimation(fig, update, frames=len(self.t), interval=50, blit=True)
         plt.close(fig)
@@ -337,7 +364,7 @@ class TwoLens1S:
         for system in self.systems:
             
             ax1.plot(system['x_src'], system['y_src'], '--', color=system['color'], alpha=0.4)
-            src_dot, = ax1.plot([], [], 'o', color=system['color'], markersize=6)
+            src_dot, = ax1.plot([], [], '*', color=system['color'], markersize=6)
             source_dots.append(src_dot)
             
             ax2.plot(self.tau, system['mag'], color=system['color'], label=f"$u_0$ = {system['u0']}")
