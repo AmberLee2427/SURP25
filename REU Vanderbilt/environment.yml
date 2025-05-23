@@ -1,0 +1,19 @@
+name: minicourse
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - numpy
+  - matplotlib
+  - pandas
+  - scipy
+  - jupyter
+  - ipython
+  - astropy
+  - beautifulsoup4
+  - lxml              # required parser for bs4
+  - pip
+  - pip:
+      - pathos
+      - MulensModel
+      - pyLIMA
