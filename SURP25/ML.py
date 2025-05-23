@@ -15,7 +15,7 @@ class OneL1S:
         self.t = np.linspace(t0-tE, t0+tE, 50)
         self.rho = rho
         self.u0_list = u0_list
-        self.tau = (t - t0) / tE
+        self.tau = (self.t - t0) / tE
 
         self.VBM = VBMicrolensing.VBMicrolensing()
         self.VBM.RelTol = 1e-3
