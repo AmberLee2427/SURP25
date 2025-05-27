@@ -186,11 +186,44 @@ class TwoLens1S:
 
     def _prepare_systems(self):
         systems = []
+
+        cent_x = []
+        cent_y = []
+
+        for x_s, y_s in zip(x_source, y_source):
+            images = self.VBM.ImageContours(self.s, self.q, x_s, y_s, self.rho)
+
+            # If images exist
+            if images:
+                x_list = []
+                y_list = []
+                mag_list = []
+                for img in images:
+                    x_img = np.array(img[0])
+                    y_img = np.array(img[1])
+                    mag = np.full_like(x_img, 1.0 / len(x_img))  # crude equal-weight for now
+                    x_list.extend(x_img)
+                    y_list.extend(y_img)
+                    mag_list.extend(mag)
+
+                mag_list = np.array(mag_list)
+                total_mag = np.sum(mag_list)
+
+                cx = np.sum(np.array(x_list) * mag_list) / total_mag
+                cy = np.sum(np.array(y_list) * mag_list) / total_mag
+            else:
+                cx = np.nan
+                cy = np.nan
+
+            cent_x.append(cx)
+            cent_y.append(cy)
+
         for u0, color in zip(self.u0_list, self.colors):
             pr = [math.log(self.s), math.log(self.q), u0, self.theta, math.log(self.rho), math.log(self.tE), self.t0]
             mag, cent_x, cent_y = self.VBM.BinaryLightCurve(pr, self.t)
             x_src = self.tau * np.cos(self.theta) - u0 * np.sin(self.theta)
             y_src = self.tau * np.sin(self.theta) + u0 * np.cos(self.theta)
+        
 
             systems.append({
                 'u0': u0,
@@ -310,6 +343,33 @@ class TwoLens1S:
         plt.tight_layout()
         plt.show()
 
+    def plot_centroid_trajectory(self):
+        plt.figure(figsize=(8, 8))
+        cmap_cs = plt.colormaps['BuPu']
+        colors_cs = [cmap_cs(i) for i in np.linspace(0.4, 1.0, len(self.u0_list))]
+
+        for idx, system in enumerate(self.systems):
+            color = colors_cs[idx]
+            x_src = system['x_src']
+            y_src = system['y_src']
+            cent_x = system['cent_x']
+            cent_y = system['cent_y']
+
+            # Shift relative to source
+            delta_x = cent_x - x_src
+            delta_y = cent_y - y_src
+
+            plt.plot(delta_x, delta_y, color=color, label=fr"$u_0$ = {system['u0']}")
+
+        plt.xlabel(r"$\delta\Theta_1$")
+        plt.ylabel(r"$\delta\Theta_2$")
+        plt.title("Centroid Trajectories (Relative to Source)")
+        plt.grid(True)
+        plt.gca().set_aspect('equal')
+        plt.legend()
+        plt.tight_layout()
+        plt.show()
+
     def show_all(self):
 
         caustics = self.VBM.Caustics(self.s, self.q)
@@ -389,6 +449,63 @@ class TwoLens1S:
         ani = animation.FuncAnimation(fig, update, frames=len(self.t), interval=50, blit=True)
         plt.close(fig)
         return HTML(ani.to_jshtml())
+    
+class Test:
+    def __init__(self, t0, tE, rho, u0_list, q, s, alpha):
+        self.t0 = t0
+        self.tE = tE
+        self.rho = rho
+        self.u0_list = u0_list
+        self.q = q
+        self.s = s
+        self.alpha = alpha
+        self.tau = np.linspace(-4, 4, 200)
+        self.t = self.t0 + self.tau * self.tE
+        self.theta = np.radians(self.alpha)
+
+        self.VBM = VBMicrolensing.VBMicrolensing()
+        self.VBM.RelTol = 1e-3
+        self.VBM.Tol = 1e-3
+        self.VBM.astrometry = True
+        self.colors = [plt.colormaps['BuPu'](i) for i in np.linspace(0.4, 1.0, len(u0_list))]
+        self.systems = self._prepare_systems()
+
+    def _prepare_systems(self):
+        systems = []
+
+        self.VBM.astrometry = True
+        self.VBM.parallaxsystem = 1
+
+        for u0, color in zip(self.u0_list, self.colors):
+            # Safety checks — let your values pass, but protect logs
+            if self.s <= 0 or self.q <= 0 or self.rho <= 0 or self.tE <= 0:
+                raise ValueError("s, q, rho, and tE must be strictly positive.")
+
+            try:
+                pr = [
+                    math.log(self.s), math.log(self.q), u0, self.theta,
+                    math.log(self.rho), math.log(self.tE), self.t0,
+                    0, 0, 0, 0, 0.1, 1.0  # astrometric parameters
+                ]
+
+                results = self.VBM.BinaryAstroLightCurve(pr, self.t)
+                mag, c1s, c2s, c1l, c2l, y1, y2 = results
+
+                systems.append({
+                    'u0': u0,
+                    'color': color,
+                    'mag': np.array(mag),
+                    'x_src': np.array(y1),
+                    'y_src': np.array(y2),
+                    'cent_x': np.array(c1s),
+                    'cent_y': np.array(c2s),
+                })
+
+            except Exception as e:
+                print(f"Failed for u0 = {u0} with error: {e}")
+                continue  # Skip broken runs but keep going
+
+        return systems
 
 
 
