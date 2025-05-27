@@ -173,7 +173,7 @@ class TwoLens1S:
         self.q = q
         self.s = s
         self.alpha = alpha
-        self.tau = np.linspace(-4, 4, 200)
+        self.tau = np.linspace(-4, 4, 100)
         self.t = self.t0 + self.tau * self.tE
         self.theta = np.radians(self.alpha)
 
@@ -187,43 +187,50 @@ class TwoLens1S:
     def _prepare_systems(self):
         systems = []
 
-        cent_x = []
-        cent_y = []
-
-        for x_s, y_s in zip(x_source, y_source):
-            images = self.VBM.ImageContours(self.s, self.q, x_s, y_s, self.rho)
-
-            # If images exist
-            if images:
-                x_list = []
-                y_list = []
-                mag_list = []
-                for img in images:
-                    x_img = np.array(img[0])
-                    y_img = np.array(img[1])
-                    mag = np.full_like(x_img, 1.0 / len(x_img))  # crude equal-weight for now
-                    x_list.extend(x_img)
-                    y_list.extend(y_img)
-                    mag_list.extend(mag)
-
-                mag_list = np.array(mag_list)
-                total_mag = np.sum(mag_list)
-
-                cx = np.sum(np.array(x_list) * mag_list) / total_mag
-                cy = np.sum(np.array(y_list) * mag_list) / total_mag
-            else:
-                cx = np.nan
-                cy = np.nan
-
-            cent_x.append(cx)
-            cent_y.append(cy)
+        def polygon_area(x, y):
+            return 0.5 * np.abs(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1)))
 
         for u0, color in zip(self.u0_list, self.colors):
-            pr = [math.log(self.s), math.log(self.q), u0, self.theta, math.log(self.rho), math.log(self.tE), self.t0]
-            mag, cent_x, cent_y = self.VBM.BinaryLightCurve(pr, self.t)
             x_src = self.tau * np.cos(self.theta) - u0 * np.sin(self.theta)
             y_src = self.tau * np.sin(self.theta) + u0 * np.cos(self.theta)
-        
+
+            cent_x = []
+            cent_y = []
+
+            for x_s, y_s in zip(x_src, y_src):
+                images = self.VBM.ImageContours(self.s, self.q, x_s, y_s, self.rho)
+
+                image_fluxes = []
+                image_cx = []
+                image_cy = []
+
+                for img in images:
+                    x = np.array(img[0])
+                    y = np.array(img[1])
+                    flux = polygon_area(x, y)
+
+                    if flux > 0:
+                        cx = np.mean(x)
+                        cy = np.mean(y)
+                        image_fluxes.append(flux)
+                        image_cx.append(cx)
+                        image_cy.append(cy)
+
+                total_flux = np.sum(image_fluxes)
+
+                if total_flux > 0:
+                    cx_weighted = np.sum(np.array(image_cx) * image_fluxes) / total_flux
+                    cy_weighted = np.sum(np.array(image_cy) * image_fluxes) / total_flux
+                else:
+                    cx_weighted = np.nan
+                    cy_weighted = np.nan
+
+                cent_x.append(cx_weighted)
+                cent_y.append(cy_weighted)
+
+            mag, *_ = self.VBM.BinaryLightCurve(
+                [math.log(self.s), math.log(self.q), u0, self.theta, math.log(self.rho), math.log(self.tE), self.t0],
+                self.t)
 
             systems.append({
                 'u0': u0,
@@ -231,9 +238,10 @@ class TwoLens1S:
                 'mag': mag,
                 'x_src': x_src,
                 'y_src': y_src,
-                'cent_x': cent_x,
-                'cent_y': cent_y
+                'cent_x': np.array(cent_x),
+                'cent_y': np.array(cent_y),
             })
+
         return systems
 
     def animate(self):
@@ -263,7 +271,7 @@ class TwoLens1S:
         source_dots, centroid_dots = [], []
         for system in self.systems:
             ax1.plot(system['x_src'], system['y_src'], '--', color=system['color'], alpha=0.4)
-            src_dot, = ax1.plot([], [], '*', color=system['color'], markersize=6)
+            src_dot, = ax1.plot([], [], '*', color=system['color'], markersize=10)
             #cen_dot, = ax1.plot([], [], 'x', color=system['color'], markersize=6, label=f"$u_0$ = {system['u0']}")
             source_dots.append(src_dot)
             #centroid_dots.append(cen_dot)
@@ -319,195 +327,137 @@ class TwoLens1S:
         plt.close(fig)
         return HTML(ani.to_jshtml())
     
-    def plot_centroid_shift(self):
-        
-        plt.figure(figsize=(10, 5))
-        cmap_cs = plt.colormaps['BuPu']
-        colors_cs = [cmap_cs(i) for i in np.linspace(0.4, 1.0, len(self.u0_list))]
-
-        for idx, system in enumerate(self.systems):
-            color = colors_cs[idx]
-            x_src = system['x_src']
-            y_src = system['y_src']
-            cent_x = system['cent_x']
-            cent_y = system['cent_y']
-
-            shift = np.sqrt((cent_x - x_src) ** 2 + (cent_y - y_src) ** 2)
-            plt.plot(self.tau, shift, color=color, label=f"$u_0$ = {system['u0']}")
-
-        plt.xlabel(r"Time ($\tau$)")
-        plt.ylabel(r"Centroid Shift ($\Delta \theta$)")
-        plt.title("Astrometric Centroid Shift for 2L1S")
-        plt.legend()
+    def plot_centroid_trajectory(self):
+        plt.figure(figsize=(6, 6))
+        for system in self.systems:
+            delta_x = system['cent_x'] - system['x_src']
+            delta_y = system['cent_y'] - system['y_src']
+            plt.plot(delta_x, delta_y, color=system['color'], label=fr"$u_0$ = {system['u0']}")
+        plt.xlim(-0.4, .8)    
+        plt.ylim(-0.4, 0.5)
+        plt.xlabel(r"$\delta \Theta_1$")
+        plt.ylabel(r"$\delta \Theta_2$")
+        plt.gca().set_aspect("equal")
+        plt.title("Centroid Trajectory from ImageContours")
         plt.grid(True)
+        plt.legend()
         plt.tight_layout()
         plt.show()
 
-    def plot_centroid_trajectory(self):
-        plt.figure(figsize=(8, 8))
-        cmap_cs = plt.colormaps['BuPu']
-        colors_cs = [cmap_cs(i) for i in np.linspace(0.4, 1.0, len(self.u0_list))]
-
-        for idx, system in enumerate(self.systems):
-            color = colors_cs[idx]
-            x_src = system['x_src']
-            y_src = system['y_src']
-            cent_x = system['cent_x']
-            cent_y = system['cent_y']
-
-            # Shift relative to source
-            delta_x = cent_x - x_src
-            delta_y = cent_y - y_src
-
-            plt.plot(delta_x, delta_y, color=color, label=fr"$u_0$ = {system['u0']}")
-
-        plt.xlabel(r"$\delta\Theta_1$")
-        plt.ylabel(r"$\delta\Theta_2$")
-        plt.title("Centroid Trajectories (Relative to Source)")
+    def plot_centroid_shift_vs_tau(self):
+        plt.figure(figsize=(6, 4))
+        for system in self.systems:
+            delta_x = system['cent_x'] - system['x_src']
+            delta_y = system['cent_y'] - system['y_src']
+            delta_theta = np.sqrt(delta_x**2 + delta_y**2)
+            plt.plot(self.tau, delta_theta, color=system['color'], label=fr"$u_0$ = {system['u0']}")
+        
+        plt.xlabel(r"Time ($\tau$)")
+        plt.ylabel(r"$|\delta \vec{\Theta}|$")
+        plt.title(r"Centroid Shift over Time ($\tau$)")
         plt.grid(True)
-        plt.gca().set_aspect('equal')
         plt.legend()
         plt.tight_layout()
         plt.show()
 
     def show_all(self):
+        from matplotlib.gridspec import GridSpec
 
+        fig = plt.figure(figsize=(8, 8))
+        gs = GridSpec(2, 2, figure=fig)
+
+        # --- Top Left: Lensing Animation ---
+        ax1 = fig.add_subplot(gs[0, 0])
         caustics = self.VBM.Caustics(self.s, self.q)
         criticalcurves = self.VBM.Criticalcurves(self.s, self.q)
-
-        fig = plt.figure(figsize=(12, 8))
-        gs = GridSpec(2, 2, height_ratios=[2, 1])
-
-        ax1 = fig.add_subplot(gs[0, 0])  # lensing event
-        ax2 = fig.add_subplot(gs[0, 1])  # light curve
-        ax3 = fig.add_subplot(gs[1, :])  # centroid shift 
-
-        #lensing event
         ax1.set_xlim(-2, 2)
         ax1.set_ylim(-2, 2)
-        ax1.set_title("2L1S Lensing Event")
-        ax1.set_xlabel(r"$\theta_x$ ($\theta_E$)")
-        ax1.set_ylabel(r"$\theta_y$ ($\theta_E$)")
         ax1.set_aspect("equal")
         ax1.grid(True)
-
+        ax1.set_title("2L1S Lensing Event")
         for cau in caustics:
             ax1.plot(cau[0], cau[1], 'r', lw=1.2)
         for crit in criticalcurves:
             ax1.plot(crit[0], crit[1], 'k--', lw=0.8)
+        x1 = -self.s * self.q / (1 + self.q)
+        x2 = self.s / (1 + self.q)
+        ax1.plot([x1, x2], [0, 0], 'ko')
 
-        m1 = 1.0 / (1 + self.q)
-        m2 = self.q / (1 + self.q)
-        x1 = -self.s * m2
-        x2 = self.s * m1
-        ax1.plot([x1, x2], [0, 0], 'ko', label="Lenses")
+        source_dots, tracer_dots, image_dots = [], [], []
+        for system in self.systems:
+            ax1.plot(system['x_src'], system['y_src'], '--', color=system['color'], alpha=0.4)
+            src_dot, = ax1.plot([], [], '*', color=system['color'], markersize=10)
+            source_dots.append(src_dot)
 
-        source_dots = []
-        tracer_dots = []
+            dots = []
+            for _ in range(5):
+                dot, = ax1.plot([], [], '.', color=system['color'], alpha=0.6, markersize=4)
+                dots.append(dot)
+            image_dots.append(dots)
 
-        #light curve
+        # --- Top Right: Light Curve ---
+        ax2 = fig.add_subplot(gs[0, 1])
         ax2.set_xlim(self.tau[0], self.tau[-1])
         all_mag = np.concatenate([s['mag'] for s in self.systems])
         ax2.set_ylim(min(all_mag)*0.95, max(all_mag)*1.05)
         ax2.set_xlabel(r"Time ($\tau$)")
         ax2.set_ylabel("Magnification")
-        ax2.set_title("Microlensing Light Curve")
-        ax2.grid(True)
+        ax2.set_title("Light Curve")
 
-        #centroid shift
-        ax3.set_title("Centroid Shift")
-        ax3.set_xlabel(r"Time ($\tau$)")
-        ax3.set_ylabel(r"$\Delta \theta$")
-        ax3.grid(True)
-
-        rho_legend = Line2D([0], [0], color='none', label=fr"$\rho$ = {self.rho}")
         for system in self.systems:
-            
-            ax1.plot(system['x_src'], system['y_src'], '--', color=system['color'], alpha=0.4)
-            src_dot, = ax1.plot([], [], '*', color=system['color'], markersize=6)
-            source_dots.append(src_dot)
-            
-            ax2.plot(self.tau, system['mag'], color=system['color'], label=f"$u_0$ = {system['u0']}")
+            ax2.plot(self.tau, system['mag'], color=system['color'])
             dot, = ax2.plot([], [], 'o', color=system['color'], markersize=6)
             tracer_dots.append(dot)
 
-            shift = np.sqrt((system['cent_x'] - system['x_src'])**2 + (system['cent_y'] - system['y_src'])**2)
-            ax3.plot(self.tau, shift, color=system['color'], label=f"$u_0$ = {system['u0']}")
-
-        handles, labels = ax1.get_legend_handles_labels()
-        ax1.legend(handles=handles + [rho_legend])
-        ax2.legend()
+        # --- Bottom Left: Centroid Trajectory ---
+        ax3 = fig.add_subplot(gs[1, 0])
+        for system in self.systems:
+            dx = system['cent_x'] - system['x_src']
+            dy = system['cent_y'] - system['y_src']
+            ax3.plot(dx, dy, color=system['color'], label=fr"$u_0$ = {system['u0']}")
+        ax3.set_xlim(-0.4, .8)
+        ax3.set_ylim(-0.4, 0.5)
+        ax3.set_title("Centroid Shift Trajectory")
+        ax3.set_xlabel(r"$\delta \Theta_1$")
+        ax3.set_ylabel(r"$\delta \Theta_2$")
+        ax3.grid(True)
+        ax3.set_aspect("equal")
         ax3.legend()
 
-        # --- Animation update ---
+        # --- Bottom Right: Centroid Shift vs Tau ---
+        ax4 = fig.add_subplot(gs[1, 1])
+        for system in self.systems:
+            dx = system['cent_x'] - system['x_src']
+            dy = system['cent_y'] - system['y_src']
+            dtheta = np.sqrt(dx**2 + dy**2)
+            ax4.plot(self.tau, dtheta, color=system['color'], label=fr"$u_0$ = {system['u0']}")
+        ax4.set_xlabel(r"Time ($\tau$)")
+        ax4.set_ylabel(r"$|\delta \vec{\Theta}|$")
+        ax4.set_title(r"Centroid Shift over Time ($\tau$)")
+        ax4.grid(True)
+        ax4.legend()
+
+        # --- Animate function ---
         def update(i):
+            artists = []
             for j, system in enumerate(self.systems):
-                source_dots[j].set_data([system['x_src'][i]], [system['y_src'][i]])
+                x_s = system['x_src'][i]
+                y_s = system['y_src'][i]
+                source_dots[j].set_data([x_s], [y_s])
                 tracer_dots[j].set_data([self.tau[i]], [system['mag'][i]])
-            return source_dots + tracer_dots
+                artists.extend([source_dots[j], tracer_dots[j]])
+
+                images = self.VBM.ImageContours(self.s, self.q, x_s, y_s, self.rho)
+                for k, dot in enumerate(image_dots[j]):
+                    if k < len(images):
+                        dot.set_data(images[k][0], images[k][1])
+                        dot.set_alpha(0.6)
+                    else:
+                        dot.set_data([], [])
+                        dot.set_alpha(0)
+                    artists.append(dot)
+            return artists
 
         ani = animation.FuncAnimation(fig, update, frames=len(self.t), interval=50, blit=True)
         plt.close(fig)
         return HTML(ani.to_jshtml())
-    
-class Test:
-    def __init__(self, t0, tE, rho, u0_list, q, s, alpha):
-        self.t0 = t0
-        self.tE = tE
-        self.rho = rho
-        self.u0_list = u0_list
-        self.q = q
-        self.s = s
-        self.alpha = alpha
-        self.tau = np.linspace(-4, 4, 200)
-        self.t = self.t0 + self.tau * self.tE
-        self.theta = np.radians(self.alpha)
-
-        self.VBM = VBMicrolensing.VBMicrolensing()
-        self.VBM.RelTol = 1e-3
-        self.VBM.Tol = 1e-3
-        self.VBM.astrometry = True
-        self.colors = [plt.colormaps['BuPu'](i) for i in np.linspace(0.4, 1.0, len(u0_list))]
-        self.systems = self._prepare_systems()
-
-    def _prepare_systems(self):
-        systems = []
-
-        self.VBM.astrometry = True
-        self.VBM.parallaxsystem = 1
-
-        for u0, color in zip(self.u0_list, self.colors):
-            # Safety checks — let your values pass, but protect logs
-            if self.s <= 0 or self.q <= 0 or self.rho <= 0 or self.tE <= 0:
-                raise ValueError("s, q, rho, and tE must be strictly positive.")
-
-            try:
-                pr = [
-                    math.log(self.s), math.log(self.q), u0, self.theta,
-                    math.log(self.rho), math.log(self.tE), self.t0,
-                    0, 0, 0, 0, 0.1, 1.0  # astrometric parameters
-                ]
-
-                results = self.VBM.BinaryAstroLightCurve(pr, self.t)
-                mag, c1s, c2s, c1l, c2l, y1, y2 = results
-
-                systems.append({
-                    'u0': u0,
-                    'color': color,
-                    'mag': np.array(mag),
-                    'x_src': np.array(y1),
-                    'y_src': np.array(y2),
-                    'cent_x': np.array(c1s),
-                    'cent_y': np.array(c2s),
-                })
-
-            except Exception as e:
-                print(f"Failed for u0 = {u0} with error: {e}")
-                continue  # Skip broken runs but keep going
-
-        return systems
-
-
-
-        
-
