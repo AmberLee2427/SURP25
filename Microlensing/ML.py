@@ -338,13 +338,13 @@ class TwoLens1S:
         plt.xlabel(r"$\delta \Theta_1$")
         plt.ylabel(r"$\delta \Theta_2$")
         plt.gca().set_aspect("equal")
-        plt.title("Centroid Trajectory from ImageContours")
+        plt.title("Centroid Trajectory")
         plt.grid(True)
         plt.legend()
         plt.tight_layout()
         plt.show()
 
-    def plot_centroid_shift_vs_tau(self):
+    def plot_centroid_shift(self):
         plt.figure(figsize=(6, 4))
         for system in self.systems:
             delta_x = system['cent_x'] - system['x_src']
@@ -361,15 +361,19 @@ class TwoLens1S:
         plt.show()
 
     def show_all(self):
-        from matplotlib.gridspec import GridSpec
 
-        fig = plt.figure(figsize=(8, 8))
+        fig = plt.figure(figsize=(9, 9), constrained_layout=True)
         gs = GridSpec(2, 2, figure=fig)
 
         # --- Top Left: Lensing Animation ---
         ax1 = fig.add_subplot(gs[0, 0])
         caustics = self.VBM.Caustics(self.s, self.q)
         criticalcurves = self.VBM.Criticalcurves(self.s, self.q)
+
+        lens_handle = Line2D([0], [0], marker='o', color='k', linestyle='None', label='Lens', markersize=6)
+        caustic_handle = Line2D([0], [0], color='r', lw=1.2, label='Caustic')
+        crit_curve_handle = Line2D([0], [0], color='k', linestyle='--', lw=0.8, label='Critical Curve')
+
         ax1.set_xlim(-2, 2)
         ax1.set_ylim(-2, 2)
         ax1.set_aspect("equal")
@@ -382,6 +386,9 @@ class TwoLens1S:
         x1 = -self.s * self.q / (1 + self.q)
         x2 = self.s / (1 + self.q)
         ax1.plot([x1, x2], [0, 0], 'ko')
+        ax1.set_ylabel(r"Y ($\theta_E$)")
+        ax1.set_xlabel(r"X ($\theta_E$)")
+        ax1.legend(handles=[lens_handle, caustic_handle, crit_curve_handle], loc='upper right', prop={'size': 8})
 
         source_dots, tracer_dots, image_dots = [], [], []
         for system in self.systems:
@@ -400,29 +407,31 @@ class TwoLens1S:
         ax2.set_xlim(self.tau[0], self.tau[-1])
         all_mag = np.concatenate([s['mag'] for s in self.systems])
         ax2.set_ylim(min(all_mag)*0.95, max(all_mag)*1.05)
-        ax2.set_xlabel(r"Time ($\tau$)")
         ax2.set_ylabel("Magnification")
         ax2.set_title("Light Curve")
+        ax2.set_xlabel(r"Time ($\tau$)")
 
         for system in self.systems:
-            ax2.plot(self.tau, system['mag'], color=system['color'])
+            ax2.plot(self.tau, system['mag'], color=system['color'], label=fr"$u_0$ = {system['u0']}")
             dot, = ax2.plot([], [], 'o', color=system['color'], markersize=6)
             tracer_dots.append(dot)
+            ax2.legend(prop={'size': 8})
 
         # --- Bottom Left: Centroid Trajectory ---
         ax3 = fig.add_subplot(gs[1, 0])
+        ax3.set_box_aspect(1)
         for system in self.systems:
             dx = system['cent_x'] - system['x_src']
             dy = system['cent_y'] - system['y_src']
-            ax3.plot(dx, dy, color=system['color'], label=fr"$u_0$ = {system['u0']}")
-        ax3.set_xlim(-0.4, .8)
-        ax3.set_ylim(-0.4, 0.5)
+            ax3.plot(dx, dy, color=system['color'], label=fr"$\rho$ = {self.rho}")
+        #ax3.set_xlim(-1, 1)
+        #ax3.set_ylim(-1, 1)
         ax3.set_title("Centroid Shift Trajectory")
         ax3.set_xlabel(r"$\delta \Theta_1$")
         ax3.set_ylabel(r"$\delta \Theta_2$")
         ax3.grid(True)
         ax3.set_aspect("equal")
-        ax3.legend()
+        ax3.legend(prop={'size': 8})
 
         # --- Bottom Right: Centroid Shift vs Tau ---
         ax4 = fig.add_subplot(gs[1, 1])
@@ -430,12 +439,13 @@ class TwoLens1S:
             dx = system['cent_x'] - system['x_src']
             dy = system['cent_y'] - system['y_src']
             dtheta = np.sqrt(dx**2 + dy**2)
-            ax4.plot(self.tau, dtheta, color=system['color'], label=fr"$u_0$ = {system['u0']}")
+            ax4.plot(self.tau, dtheta, color=system['color'])
         ax4.set_xlabel(r"Time ($\tau$)")
         ax4.set_ylabel(r"$|\delta \vec{\Theta}|$")
         ax4.set_title(r"Centroid Shift over Time ($\tau$)")
         ax4.grid(True)
-        ax4.legend()
+    
+        #fig.subplots_adjust(hspace=0.2, wspace=0.2)    
 
         # --- Animate function ---
         def update(i):
@@ -461,3 +471,4 @@ class TwoLens1S:
         ani = animation.FuncAnimation(fig, update, frames=len(self.t), interval=50, blit=True)
         plt.close(fig)
         return HTML(ani.to_jshtml())
+
