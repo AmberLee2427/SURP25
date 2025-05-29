@@ -177,6 +177,9 @@ class TwoLens1S:
         self.t = self.t0 + self.tau * self.tE
         self.theta = np.radians(self.alpha)
 
+        self.tau_hr = np.linspace(-4, 4, 1000)
+        self.t_hr = self.t0 + self.tau_hr * self.tE
+
         self.VBM = VBMicrolensing.VBMicrolensing()
         self.VBM.RelTol = 1e-3
         self.VBM.Tol = 1e-3
@@ -190,12 +193,14 @@ class TwoLens1S:
         def polygon_area(x, y):
             return 0.5 * np.abs(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1)))
 
-        for u0, color in zip(self.u0_list, self.colors):
-            x_src = self.tau * np.cos(self.theta) - u0 * np.sin(self.theta)
+        for u0, color in zip(self.u0_list, self.colors): 
+            x_src = self.tau * np.cos(self.theta) - u0 * np.sin(self.theta) #for animation (lower resolution) 
             y_src = self.tau * np.sin(self.theta) + u0 * np.cos(self.theta)
 
             cent_x = []
             cent_y = []
+
+
 
             for x_s, y_s in zip(x_src, y_src):
                 images = self.VBM.ImageContours(self.s, self.q, x_s, y_s, self.rho)
@@ -228,6 +233,41 @@ class TwoLens1S:
                 cent_x.append(cx_weighted)
                 cent_y.append(cy_weighted)
 
+            x_src_hr = self.tau_hr * np.cos(self.theta) - u0 * np.sin(self.theta) #for centroid shift, higher resolution
+            y_src_hr = self.tau_hr * np.sin(self.theta) + u0 * np.cos(self.theta)
+
+            cent_x_hr = []
+            cent_y_hr = []
+
+            for x_s, y_s in zip(x_src_hr, y_src_hr):
+                images = self.VBM.ImageContours(self.s, self.q, x_s, y_s, self.rho)
+
+                image_fluxes, image_cx, image_cy = [], [], []
+
+                for img in images:
+                    x = np.array(img[0])
+                    y = np.array(img[1])
+                    flux = polygon_area(x, y)
+
+                    if flux > 0:
+                        cx = np.mean(x)
+                        cy = np.mean(y)
+                        image_fluxes.append(flux)
+                        image_cx.append(cx)
+                        image_cy.append(cy)
+
+                total_flux = np.sum(image_fluxes)
+
+                if total_flux > 0:
+                    cx_weighted = np.sum(np.array(image_cx) * image_fluxes) / total_flux
+                    cy_weighted = np.sum(np.array(image_cy) * image_fluxes) / total_flux
+                else:
+                    cx_weighted = np.nan
+                    cy_weighted = np.nan
+
+                cent_x_hr.append(cx_weighted)
+                cent_y_hr.append(cy_weighted)
+
             mag, *_ = self.VBM.BinaryLightCurve(
                 [math.log(self.s), math.log(self.q), u0, self.theta, math.log(self.rho), math.log(self.tE), self.t0],
                 self.t)
@@ -240,9 +280,63 @@ class TwoLens1S:
                 'y_src': y_src,
                 'cent_x': np.array(cent_x),
                 'cent_y': np.array(cent_y),
+                'x_src_hr': x_src_hr,
+                'y_src_hr': y_src_hr,
+                'cent_x_hr': np.array(cent_x_hr),
+                'cent_y_hr': np.array(cent_y_hr),
             })
 
         return systems
+    
+    def plot_caustic_critical_curves(self):
+        caustics = self.VBM.Caustics(self.s, self.q)
+        criticalcurves = self.VBM.Criticalcurves(self.s, self.q)
+
+        lens_handle = Line2D([0], [0], marker='o', color='k', linestyle='None', label='Lens', markersize=6)
+        caustic_handle = Line2D([0], [0], color='r', lw=1.2, label='Caustic')
+        crit_curve_handle = Line2D([0], [0], color='k', linestyle='--', lw=0.8, label='Critical Curve')
+        q_handle = Line2D([0], [0], color='k', linestyle='None', label=fr"$q$ = {self.q}")
+        s_handle = Line2D([0], [0], color='k', linestyle='None', label=fr"$s$ = {self.s}")
+                          
+
+        plt.figure(figsize=(6, 6))
+
+        for cau in caustics:
+            plt.plot(cau[0], cau[1], 'r', lw=1.2)
+        for crit in criticalcurves:
+            plt.plot(crit[0], crit[1], 'k--', lw=0.8)
+
+        x1 = -self.s * self.q / (1 + self.q)
+        x2 = self.s / (1 + self.q)
+        plt.plot([x1, x2], [0, 0], 'ko')
+
+        for system in self.systems:
+            plt.plot(system['x_src'], system['y_src'], '--', color=system['color'], alpha=0.6)
+
+        plt.xlim(-2, 2)
+        plt.ylim(-2, 2)
+        plt.xlabel(r"$\theta_x$ ($\theta_E$)")
+        plt.ylabel(r"$\theta_y$ ($\theta_E$)")
+        plt.title("2L1S Lensing Event")
+        plt.gca().set_aspect("equal")
+        plt.grid(True)
+        plt.legend(handles=[lens_handle, caustic_handle, crit_curve_handle, q_handle, s_handle], loc='upper right', prop={'size': 8})
+        plt.tight_layout()
+        plt.show()
+
+    def plot_light_curve(self):
+        plt.figure(figsize=(6, 4))
+        
+        for system in self.systems:
+            plt.plot(self.tau, system['mag'], color=system['color'], label=fr"$u_0$ = {system['u0']}")
+        
+        plt.xlabel(r"Time ($\tau$)")
+        plt.ylabel("Magnification")
+        plt.title("Light Curve")
+        plt.grid(True)
+        plt.legend()
+        plt.tight_layout()
+        plt.show()    
 
     def animate(self):
         caustics = self.VBM.Caustics(self.s, self.q)
@@ -250,6 +344,12 @@ class TwoLens1S:
 
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
         fig.subplots_adjust(wspace=0.4)
+
+        lens_handle = Line2D([0], [0], marker='o', color='k', linestyle='None', label='Lens', markersize=6)
+        caustic_handle = Line2D([0], [0], color='r', lw=1.2, label='Caustic')
+        crit_curve_handle = Line2D([0], [0], color='k', linestyle='--', lw=0.8, label='Critical Curve')
+        q_handle = Line2D([0], [0], color='k', linestyle='None', label=fr"$q$ = {self.q}")
+        s_handle = Line2D([0], [0], color='k', linestyle='None', label=fr"$s$ = {self.s}")
 
         ax1.set_xlim(-2, 2)
         ax1.set_ylim(-2, 2)
@@ -266,7 +366,7 @@ class TwoLens1S:
 
         x1 = -self.s * self.q / (1 + self.q)
         x2 = self.s / (1 + self.q)
-        ax1.plot([x1, x2], [0, 0], 'ko', label="Lenses")
+        ax1.legend(handles=[lens_handle, caustic_handle, crit_curve_handle, q_handle, s_handle], loc='upper right', prop={'size': 8})
 
         source_dots, centroid_dots = [], []
         for system in self.systems:
@@ -330,8 +430,8 @@ class TwoLens1S:
     def plot_centroid_trajectory(self):
         plt.figure(figsize=(6, 6))
         for system in self.systems:
-            delta_x = system['cent_x'] - system['x_src']
-            delta_y = system['cent_y'] - system['y_src']
+            delta_x = system['cent_x_hr'] - system['x_src_hr']
+            delta_y = system['cent_y_hr'] - system['y_src_hr']
             plt.plot(delta_x, delta_y, color=system['color'], label=fr"$u_0$ = {system['u0']}")
         plt.xlim(-0.4, .8)    
         plt.ylim(-0.4, 0.5)
@@ -347,10 +447,10 @@ class TwoLens1S:
     def plot_centroid_shift(self):
         plt.figure(figsize=(6, 4))
         for system in self.systems:
-            delta_x = system['cent_x'] - system['x_src']
-            delta_y = system['cent_y'] - system['y_src']
+            delta_x = system['cent_x_hr'] - system['x_src_hr']
+            delta_y = system['cent_y_hr'] - system['y_src_hr']
             delta_theta = np.sqrt(delta_x**2 + delta_y**2)
-            plt.plot(self.tau, delta_theta, color=system['color'], label=fr"$u_0$ = {system['u0']}")
+            plt.plot(self.tau_hr, delta_theta, color=system['color'], label=fr"$u_0$ = {system['u0']}")
         
         plt.xlabel(r"Time ($\tau$)")
         plt.ylabel(r"$|\delta \vec{\Theta}|$")
@@ -373,6 +473,8 @@ class TwoLens1S:
         lens_handle = Line2D([0], [0], marker='o', color='k', linestyle='None', label='Lens', markersize=6)
         caustic_handle = Line2D([0], [0], color='r', lw=1.2, label='Caustic')
         crit_curve_handle = Line2D([0], [0], color='k', linestyle='--', lw=0.8, label='Critical Curve')
+        q_handle = Line2D([0], [0], color='k', linestyle='None', label=fr"$q$ = {self.q}")
+        s_handle = Line2D([0], [0], color='k', linestyle='None', label=fr"$s$ = {self.s}")
 
         ax1.set_xlim(-2, 2)
         ax1.set_ylim(-2, 2)
@@ -388,7 +490,7 @@ class TwoLens1S:
         ax1.plot([x1, x2], [0, 0], 'ko')
         ax1.set_ylabel(r"Y ($\theta_E$)")
         ax1.set_xlabel(r"X ($\theta_E$)")
-        ax1.legend(handles=[lens_handle, caustic_handle, crit_curve_handle], loc='upper right', prop={'size': 8})
+        ax1.legend(handles=[lens_handle, caustic_handle, crit_curve_handle, q_handle, s_handle], loc='upper right', prop={'size': 8})
 
         source_dots, tracer_dots, image_dots = [], [], []
         for system in self.systems:
@@ -420,9 +522,10 @@ class TwoLens1S:
         # --- Bottom Left: Centroid Trajectory ---
         ax3 = fig.add_subplot(gs[1, 0])
         ax3.set_box_aspect(1)
+
         for system in self.systems:
-            dx = system['cent_x'] - system['x_src']
-            dy = system['cent_y'] - system['y_src']
+            dx = system['cent_x_hr'] - system['x_src_hr']
+            dy = system['cent_y_hr'] - system['y_src_hr']
             ax3.plot(dx, dy, color=system['color'], label=fr"$\rho$ = {self.rho}")
         #ax3.set_xlim(-1, 1)
         #ax3.set_ylim(-1, 1)
@@ -436,10 +539,10 @@ class TwoLens1S:
         # --- Bottom Right: Centroid Shift vs Tau ---
         ax4 = fig.add_subplot(gs[1, 1])
         for system in self.systems:
-            dx = system['cent_x'] - system['x_src']
-            dy = system['cent_y'] - system['y_src']
+            dx = system['cent_x_hr'] - system['x_src_hr']
+            dy = system['cent_y_hr'] - system['y_src_hr']
             dtheta = np.sqrt(dx**2 + dy**2)
-            ax4.plot(self.tau, dtheta, color=system['color'])
+            ax4.plot(self.tau_hr, dtheta, color=system['color'])
         ax4.set_xlabel(r"Time ($\tau$)")
         ax4.set_ylabel(r"$|\delta \vec{\Theta}|$")
         ax4.set_title(r"Centroid Shift over Time ($\tau$)")
