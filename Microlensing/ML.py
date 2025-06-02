@@ -200,8 +200,6 @@ class TwoLens1S:
             cent_x = []
             cent_y = []
 
-
-
             for x_s, y_s in zip(x_src, y_src):
                 images = self.VBM.ImageContours(self.s, self.q, x_s, y_s, self.rho)
 
@@ -574,4 +572,29 @@ class TwoLens1S:
         ani = animation.FuncAnimation(fig, update, frames=len(self.t), interval=50, blit=True)
         plt.close(fig)
         return HTML(ani.to_jshtml())
+    
+class ThreeLens1S:
+    def __init__(self, t0, tE, rho, u0_list, q, s12, s23, alpha, phi):
+        self.t0 = t0
+        self.tE = tE
+        self.rho = rho
+        self.u0_list = u0_list
+        self.q = q
+        self.s12 = s12
+        self.s23 = s23
+        self.alpha = alpha
+        self.phi = phi
+        self.tau = np.linspace(-4, 4, 100)
+        self.t = self.t0 + self.tau * self.tE
+        self.theta = np.radians(self.alpha)
+
+        self.tau_hr = np.linspace(-4, 4, 1000)
+        self.t_hr = self.t0 + self.tau_hr * self.tE
+
+        self.VBM = VBMicrolensing.VBMicrolensing()
+        self.VBM.RelTol = 1e-3
+        self.VBM.Tol = 1e-3
+        self.VBM.astrometry = True
+        self.colors = [plt.colormaps['BuPu'](i) for i in np.linspace(0.4, 1.0, len(u0_list))]
+        self.systems = self._prepare_systems()
 
