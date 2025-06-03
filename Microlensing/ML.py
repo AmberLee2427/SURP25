@@ -184,7 +184,7 @@ class TwoLens1S:
         self.VBM.RelTol = 1e-3
         self.VBM.Tol = 1e-3
         self.VBM.astrometry = True
-        self.colors = [plt.colormaps['BuPu'](i) for i in np.linspace(0.4, 1.0, len(u0_list))]
+        self.colors = [plt.colormaps['BuPu'](i) for i in np.linspace(1.0, 0.4, len(u0_list))]
         self.systems = self._prepare_systems()
 
     def _prepare_systems(self):
@@ -595,7 +595,7 @@ class ThreeLens1S:
         self.VBM.astrometry = True
         self.VBM.SetMethod(self.VBM.Method.Nopoly)
 
-        self.colors = [plt.colormaps['BuPu'](i) for i in np.linspace(0.4, 1.0, len(u0_list))]
+        self.colors = [plt.colormaps['BuPu'](i) for i in np.linspace(1.0, .4, len(u0_list))]
         self.systems = self._prepare_systems()
 
     def _prepare_systems(self):
