@@ -574,12 +574,13 @@ class TwoLens1S:
         return HTML(ani.to_jshtml())
     
 class ThreeLens1S:
-    def __init__(self, t0, tE, rho, u0_list, q, s12, s23, alpha, phi):
+    def __init__(self, t0, tE, rho, u0_list, q2, q3, s12, s23, alpha, phi):
         self.t0 = t0
         self.tE = tE
         self.rho = rho
         self.u0_list = u0_list
-        self.q = q
+        self.q2 = q2
+        self.q3 = q3
         self.s12 = s12
         self.s23 = s23
         self.alpha = alpha
@@ -588,13 +589,175 @@ class ThreeLens1S:
         self.t = self.t0 + self.tau * self.tE
         self.theta = np.radians(self.alpha)
 
-        self.tau_hr = np.linspace(-4, 4, 1000)
-        self.t_hr = self.t0 + self.tau_hr * self.tE
-
         self.VBM = VBMicrolensing.VBMicrolensing()
         self.VBM.RelTol = 1e-3
         self.VBM.Tol = 1e-3
         self.VBM.astrometry = True
+        self.VBM.SetMethod(self.VBM.Method.Nopoly)
+
         self.colors = [plt.colormaps['BuPu'](i) for i in np.linspace(0.4, 1.0, len(u0_list))]
         self.systems = self._prepare_systems()
+
+    def _prepare_systems(self):
+        systems = []
+        for u0, color in zip(self.u0_list, self.colors):
+            param_vec = [
+                np.log(self.s12), np.log(self.q2), u0, self.alpha,
+                np.log(self.rho), np.log(self.tE), self.t0,
+                np.log(self.s23), np.log(self.q3), self.phi
+            ]
+
+            mag, *_ = self.VBM.TripleLightCurve(param_vec, self.t)
+
+            x_src = self.tau * np.cos(self.theta) - u0 * np.sin(self.theta)
+            y_src = self.tau * np.sin(self.theta) + u0 * np.cos(self.theta)
+
+            systems.append({
+                'u0': u0,
+                'color': color,
+                'mag': mag,
+                'x_src': x_src,
+                'y_src': y_src
+            })
+
+        return systems
+
+    def _setting_parameters(self):
+        """
+        """
+        param = [
+            np.log(self.s12), np.log(self.q2), self.u0_list[0], self.alpha,
+            np.log(self.rho), np.log(self.tE), self.t0,
+            np.log(self.s23), np.log(self.q3), self.phi
+        ]
+        _ = self.VBM.TripleLightCurve(param, self.t)
+
+    def _compute_lens_positions(self):
+        
+        m1 = 1.0 - self.q2 - self.q3
+        m2 = self.q2
+        m3 = self.q3
+
+        s12 = self.s12
+        s23 = self.s23
+
+        
+        x1 = -(m2 * s12 + m3 * (s12 + s23))
+        x2 = x1 + s12
+        x3 = x2 + s23
+
+        return [(x1, 0), (x2, 0), (x3, 0)]
+
+    def plot_caustic_critical_curves(self):
+        self._setting_parameters()
+        caustics = self.VBM.Multicaustics()
+        criticalcurves = self.VBM.Multicriticalcurves()
+
+        plt.figure(figsize=(6, 6))
+        lens_handle = Line2D([0], [0], marker='o', color='k', linestyle='None', label='Lens', markersize=6)
+        caustic_handle = Line2D([0], [0], color='r', lw=1.2, label='Caustic')
+        crit_curve_handle = Line2D([0], [0], color='k', linestyle='--', lw=0.8, label='Critical Curve')
+
+        for cau in caustics:
+            plt.plot(cau[0], cau[1], 'r', lw=1.2)
+        for crit in criticalcurves:
+            plt.plot(crit[0], crit[1], 'k--', lw=0.8)
+
+        for system in self.systems:
+            plt.plot(system['x_src'], system['y_src'], '--', color=system['color'], alpha=0.6)
+
+        lens_positions = self._compute_lens_positions()
+        for x, y in lens_positions:
+            plt.plot(x, y, 'ko', label='Lens')
+
+        plt.xlim(-2, 2)
+        plt.ylim(-2, 2)
+        plt.xlabel(r"$\theta_x$ ($\theta_E$)")
+        plt.ylabel(r"$\theta_y$ ($\theta_E$)")
+        plt.title("3L1S Lensing Event")
+        plt.gca().set_aspect("equal")
+        plt.legend(handles=[lens_handle, caustic_handle, crit_curve_handle], loc='upper right')
+        plt.grid(True)
+        plt.tight_layout()
+        plt.show()
+
+    def plot_light_curve(self):
+        plt.figure(figsize=(6, 4))
+        for system in self.systems:
+            plt.plot(self.tau, system['mag'], color=system['color'], label=fr"$u_0$ = {system['u0']}")
+        plt.xlabel(r"Time ($\tau$)")
+        plt.ylabel("Magnification")
+        plt.title("Triple Lens Light Curve")
+        plt.grid(True)
+        plt.legend()
+        plt.tight_layout()
+        plt.show()
+
+    def animate(self):
+        self._setting_parameters()
+        caustics = self.VBM.Multicaustics()
+        criticalcurves = self.VBM.Multicriticalcurves()
+        lens_positions = self._compute_lens_positions()
+
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
+        fig.subplots_adjust(wspace=0.4)
+
+        lens_handle = Line2D([0], [0], marker='o', color='k', linestyle='None', label='Lens', markersize=6)
+        caustic_handle = Line2D([0], [0], color='r', lw=1.2, label='Caustic')
+        crit_curve_handle = Line2D([0], [0], color='k', linestyle='--', lw=0.8, label='Critical Curve')
+
+        ax1.set_xlim(-2, 2)
+        ax1.set_ylim(-2, 2)
+        ax1.set_xlabel(r"$\theta_x$ ($\theta_E$)")
+        ax1.set_ylabel(r"$\theta_y$ ($\theta_E$)")
+        ax1.set_title("3L1S Microlensing Event")
+        ax1.set_aspect("equal")
+        ax1.grid(True)
+
+        for cau in caustics:
+            ax1.plot(cau[0], cau[1], 'r', lw=1.2)
+        for crit in criticalcurves:
+            ax1.plot(crit[0], crit[1], 'k--', lw=0.8)
+
+        for x, y in lens_positions:
+            ax1.plot(x, y, 'ko')
+
+        source_dots = []
+        for system in self.systems:
+            ax1.plot(system['x_src'], system['y_src'], '--', color=system['color'], alpha=0.4)
+            src_dot, = ax1.plot([], [], '*', color=system['color'], markersize=10)
+            source_dots.append(src_dot)
+
+        ax1.legend(handles=[lens_handle, caustic_handle, crit_curve_handle], loc='upper right', prop={'size': 8})
+
+        ax2.set_xlim(self.tau[0], self.tau[-1])
+        all_mag = np.concatenate([s['mag'] for s in self.systems])
+        ax2.set_ylim(min(all_mag) * 0.95, max(all_mag) * 1.05)
+        ax2.set_xlabel(r"Time ($\tau$)")
+        ax2.set_ylabel("Magnification")
+        ax2.set_title("Light Curve")
+
+        tracer_dots = []
+        for system in self.systems:
+            ax2.plot(self.tau, system['mag'], color=system['color'], label=f"$u_0$ = {system['u0']}")
+            dot, = ax2.plot([], [], 'o', color=system['color'], markersize=6)
+            tracer_dots.append(dot)
+        ax2.legend()
+
+        def update(i):
+            artists = []
+            for j, system in enumerate(self.systems):
+                x_src = system['x_src'][i]
+                y_src = system['y_src'][i]
+
+                source_dots[j].set_data([x_src], [y_src])
+                tracer_dots[j].set_data([self.tau[i]], [system['mag'][i]])
+
+                artists.extend([source_dots[j], tracer_dots[j]])
+
+            return artists
+
+        ani = animation.FuncAnimation(fig, update, frames=len(self.t), interval=50, blit=True)
+        plt.close(fig)
+        return HTML(ani.to_jshtml())
 
