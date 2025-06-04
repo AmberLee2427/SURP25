@@ -574,7 +574,7 @@ class TwoLens1S:
         return HTML(ani.to_jshtml())
     
 class ThreeLens1S:
-    def __init__(self, t0, tE, rho, u0_list, q2, q3, s12, s23, alpha, phi):
+    def __init__(self, t0, tE, rho, u0_list, q2, q3, s12, s23, alpha, psi):
         self.t0 = t0
         self.tE = tE
         self.rho = rho
@@ -584,10 +584,11 @@ class ThreeLens1S:
         self.s12 = s12
         self.s23 = s23
         self.alpha = alpha
-        self.phi = phi
+        self.psi = psi
         self.tau = np.linspace(-4, 4, 100)
         self.t = self.t0 + self.tau * self.tE
         self.theta = np.radians(self.alpha)
+        self.psi_rad = np.radians(self.psi)
 
         self.VBM = VBMicrolensing.VBMicrolensing()
         self.VBM.RelTol = 1e-3
@@ -604,7 +605,7 @@ class ThreeLens1S:
             param_vec = [
                 np.log(self.s12), np.log(self.q2), u0, self.alpha,
                 np.log(self.rho), np.log(self.tE), self.t0,
-                np.log(self.s23), np.log(self.q3), self.phi
+                np.log(self.s23), np.log(self.q3), self.psi
             ]
 
             mag, *_ = self.VBM.TripleLightCurve(param_vec, self.t)
@@ -628,12 +629,11 @@ class ThreeLens1S:
         param = [
             np.log(self.s12), np.log(self.q2), self.u0_list[0], self.alpha,
             np.log(self.rho), np.log(self.tE), self.t0,
-            np.log(self.s23), np.log(self.q3), self.phi
+            np.log(self.s23), np.log(self.q3), self.psi
         ]
         _ = self.VBM.TripleLightCurve(param, self.t)
 
     def _compute_lens_positions(self):
-        
         m1 = 1.0 - self.q2 - self.q3
         m2 = self.q2
         m3 = self.q3
@@ -641,12 +641,13 @@ class ThreeLens1S:
         s12 = self.s12
         s23 = self.s23
 
-        
-        x1 = -(m2 * s12 + m3 * (s12 + s23))
-        x2 = x1 + s12
-        x3 = x2 + s23
+        x1, y1 = 0, 0
+        x2, y2 = x1 + s12, y1
 
-        return [(x1, 0), (x2, 0), (x3, 0)]
+        x3 = x2 + s23 * np.cos(self.psi_rad)
+        y3 = y2 + s23 * np.sin(self.psi_rad)
+
+        return [(x1, y1), (x2, y2), (x3, y3)]
 
     def plot_caustic_critical_curves(self):
         self._setting_parameters()
@@ -760,4 +761,52 @@ class ThreeLens1S:
         ani = animation.FuncAnimation(fig, update, frames=len(self.t), interval=50, blit=True)
         plt.close(fig)
         return HTML(ani.to_jshtml())
+    
+    def plot_different_q3_lc(self, q3_values, reference_q3=None, colormap='RdPu'): 
+        """
+        """
+        colors = [plt.colormaps[colormap](i) for i in np.linspace(.5, 1, len(q3_values))]
+        
+        plt.figure(figsize=(8, 6))
+        gs = plt.GridSpec(2, 1, height_ratios=[3, 1], hspace=0.05)
+        ax1 = plt.subplot(gs[0])
+        ax2 = plt.subplot(gs[1], sharex=ax1)
+
+        ref_q3 = reference_q3 if reference_q3 is not None else q3_values[0]
+        ref_param = [
+            np.log(self.s12), np.log(self.q2), self.u0_list[0], self.alpha,
+            np.log(self.rho), np.log(self.tE), self.t0,
+            np.log(self.s23), np.log(ref_q3), self.psi
+        ]
+        ref_mag, *_ = self.VBM.TripleLightCurve(ref_param, self.t)
+
+        for idx, q3 in enumerate(q3_values):
+            color = colors[idx]
+            param_vec = [
+                np.log(self.s12), np.log(self.q2), self.u0_list[0], self.alpha,
+                np.log(self.rho), np.log(self.tE), self.t0,
+                np.log(self.s23), np.log(q3), self.psi
+            ]
+            mag, *_ = self.VBM.TripleLightCurve(param_vec, self.t)
+
+            label = fr"$q_3$ = {q3:.2e}"
+            ax1.plot(self.tau, mag, label=label, color=color)
+            residual = np.array(ref_mag) - np.array(mag)
+            ax2.plot(self.tau, residual, color=color)
+
+        ax1.set_ylabel("Magnification")
+        ax1.set_title("Light Curve for Varying $q_3$")
+        ax1.grid(True)
+        ax1.legend()
+
+        ax2.set_xlabel(r"Time ($\tau$)")
+        ax2.set_ylabel("Residuals")
+        ax2.axhline(0, color='gray', lw=0.5, ls='--')
+        ax2.grid(True)
+
+        plt.tight_layout()
+        plt.show()
+
+
+
 
