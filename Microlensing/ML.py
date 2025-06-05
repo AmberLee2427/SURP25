@@ -4,6 +4,7 @@ import matplotlib.animation as animation
 from matplotlib.gridspec import GridSpec
 from IPython.display import HTML, display
 import VBMicrolensing
+import TripleLensing
 import math
 from matplotlib.lines import Line2D
 
@@ -634,20 +635,34 @@ class ThreeLens1S:
         _ = self.VBM.TripleLightCurve(param, self.t)
 
     def _compute_lens_positions(self):
-        m1 = 1.0 - self.q2 - self.q3
-        m2 = self.q2
-        m3 = self.q3
-
-        s12 = self.s12
-        s23 = self.s23
-
         x1, y1 = 0, 0
-        x2, y2 = x1 + s12, y1
-
-        x3 = x2 + s23 * np.cos(self.psi_rad)
-        y3 = y2 + s23 * np.sin(self.psi_rad)
-
+        x2, y2 = x1 + self.s12, y1
+        x3 = x2 + self.s23 * np.cos(self.psi_rad)
+        y3 = y2 + self.s23 * np.sin(self.psi_rad)
         return [(x1, y1), (x2, y2), (x3, y3)]
+    
+    def _calculate_image_positions(self, xs, ys):
+        TRIL = TripleLensing.TripleLensing()
+        mlens = [1 - self.q2 - self.q3, self.q2, self.q3]
+        zlens = self._compute_lens_positions()
+        zlens_cpp_format = [coord for pair in zlens for coord in pair] 
+        nlens = len(mlens)
+
+        zrxy_flat = TRIL.solv_lens_equation(mlens, zlens_cpp_format, xs, ys, nlens)
+        degree = nlens * nlens + 1
+        real_parts = zrxy_flat[:degree]
+        imag_parts = zrxy_flat[degree:2 * degree]
+
+        return [complex(re, im) for re, im in zip(real_parts, imag_parts)]
+    
+    def _true_solution(self, z_image, xs, ys, so_leps=1e-10):
+        mlens = [1 - self.q2 - self.q3, self.q2, self.q3]
+        zlens = [complex(x, y) for x, y in self._compute_lens_positions()]
+        zs = complex(xs, ys)
+        dzs = zs - z_image
+        for m, zl in zip(mlens, zlens):
+            dzs += m / np.conj(z_image - zl)
+        return abs(dzs) < so_leps
 
     def plot_caustic_critical_curves(self):
         self._setting_parameters()
@@ -719,15 +734,17 @@ class ThreeLens1S:
             ax1.plot(cau[0], cau[1], 'r', lw=1.2)
         for crit in criticalcurves:
             ax1.plot(crit[0], crit[1], 'k--', lw=0.8)
-
         for x, y in lens_positions:
             ax1.plot(x, y, 'ko')
 
         source_dots = []
+        image_dots = []
         for system in self.systems:
             ax1.plot(system['x_src'], system['y_src'], '--', color=system['color'], alpha=0.4)
             src_dot, = ax1.plot([], [], '*', color=system['color'], markersize=10)
+            dots = [ax1.plot([], [], 'o', color='gray', markersize=4)[0] for _ in range(10)]
             source_dots.append(src_dot)
+            image_dots.append(dots)
 
         ax1.legend(handles=[lens_handle, caustic_handle, crit_curve_handle], loc='upper right', prop={'size': 8})
 
@@ -750,17 +767,34 @@ class ThreeLens1S:
             for j, system in enumerate(self.systems):
                 x_src = system['x_src'][i]
                 y_src = system['y_src'][i]
-
                 source_dots[j].set_data([x_src], [y_src])
-                tracer_dots[j].set_data([self.tau[i]], [system['mag'][i]])
+                artists.append(source_dots[j])
 
-                artists.extend([source_dots[j], tracer_dots[j]])
+                images = self._calculate_image_positions(x_src, y_src)
+                verified_images = [img for img in images if self._true_solution(img, x_src, y_src)]
+
+                for k in range(len(image_dots[j])):
+                    if k < len(verified_images):
+                        image_dots[j][k].set_data([verified_images[k].real], [verified_images[k].imag])
+                    else:
+                        image_dots[j][k].set_data([], [])
+                    artists.append(image_dots[j][k])
+
+                tracer_dots[j].set_data([self.tau[i]], [system['mag'][i]])
+                artists.append(tracer_dots[j])
+
+                print(f"Frame {i}: Source = ({x_src:.3f}, {y_src:.3f})")
+                print(f"  Total images: {len(images)}")
+                print(f"  Verified images: {len(verified_images)}")
 
             return artists
-
+        
         ani = animation.FuncAnimation(fig, update, frames=len(self.t), interval=50, blit=True)
         plt.close(fig)
         return HTML(ani.to_jshtml())
+
+    
+
     
     def plot_different_q3_lc(self, q3_values, reference_q3=None, colormap='RdPu'): 
         """
