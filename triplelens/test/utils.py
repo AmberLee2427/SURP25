@@ -771,13 +771,13 @@ def plot_critcaus_srcimgs(mlens, zlens, xsCenter, ysCenter, rs,nphi=2000, NPS=40
                             width=wh, # width = 30% of parent_bbox
                             height=wh, # height : 1 inch
                             loc=1) #1 top right, 
-        inset_axes.plot(criticalx, criticaly, '--', color='red', markersize=1)
+        inset_axes.plot(criticalx, criticaly, '--', color='black', markersize=1)
         inset_axes.plot(causticsx, causticsy, '-', color='red', markersize=1)
         inset_axes.plot(XS, YS, 'k')
         inset_axes.plot(imgXS, imgYS, '.', color=cl, markersize=1)
         # inset_axes.plot(imgXS, imgYS, '.', color='magenta', markersize=1)
-        inset_axes.plot(falseimgXS, falseimgYS, '.', color='b', markersize=1)
-        inset_axes.plot([xy[0]for xy in z], [xy[1]for xy in z], '+', color='k', markersize=15)
+        inset_axes.plot(falseimgXS, falseimgYS, '.', color='b', markersize=1, alpha=0.5)
+        inset_axes.plot([xy[0]for xy in z], [xy[1]for xy in z], '.', color='k', markersize=15)
         inset_axes.tick_params(axis='both', labelsize = 12, direction="in")
         # inset_axes.set_xlim(-0.06,0.04)
         # inset_axes.set_ylim(-0.05,0.05)
