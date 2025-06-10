@@ -727,14 +727,14 @@ def plot_critcaus_srcimgs(mlens, zlens, xsCenter, ysCenter, rs,nphi=2000, NPS=40
     criticalx = [xy[0]for xy in critical]
     criticaly = [xy[1]for xy in critical]
     ax.plot(causticsx, causticsy, '-', color='red', markersize=1)
-    ax.plot(criticalx, criticaly, '--', color='r', markersize=1)
+    ax.plot(criticalx, criticaly, '--', color='k', markersize=1)
 
     Phis = getphis_v3(mlens, z, xsCenter, ysCenter, rs, nphi, causticsx, causticsy,secnum=secnum, basenum = basenum, scale = scale)
     Phis = Phis[0]
     # print("uniphi in image plane, len PHI:", len(Phis))
     imgXS, imgYS, XS, YS, falseimgXS, falseimgYS = get_allimgs_v2(mlens, z, xsCenter, ysCenter, rs, nlens, Phis)
 
-    ax.plot([xy[0]for xy in z], [xy[1]for xy in z], '+', color='k', markersize=15)
+    ax.plot([xy[0]for xy in z], [xy[1]for xy in z], '.', color='k', markersize=15)
     # ax.plot([xsCenter], [ysCenter], '*', color='orange', markersize=15,zorder=-1)
     ax.plot(XS, YS, '.', color="k" , markersize=1)
     ax.plot(imgXS, imgYS, '.', color=cl, markersize=1)
@@ -742,7 +742,7 @@ def plot_critcaus_srcimgs(mlens, zlens, xsCenter, ysCenter, rs,nphi=2000, NPS=40
     # ax.plot(imgXS, imgYS, '.', color='cyan', markersize=1)
     if pltfalseimg:
         # ax.plot(falseimgXS, falseimgYS, '.', color='b', markersize=1)
-        ax.plot(falseimgXS, falseimgYS, '.', color='gray', markersize=1) # 2020.11.02
+        ax.plot(falseimgXS, falseimgYS, '.', color='gray', markersize=1, alpha =0.5) # 2020.11.02
 
     if srctext:
         for xy,m,i in zip(z, mlens, range(nlens)):
