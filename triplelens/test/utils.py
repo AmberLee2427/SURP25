@@ -7,6 +7,13 @@ import sys
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes as iax
 from matplotlib import gridspec
 from matplotlib.ticker import MaxNLocator, AutoMinorLocator, FormatStrFormatter
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+from matplotlib.gridspec import GridSpec
+from IPython.display import HTML, display
+import math
+from matplotlib.lines import Line2D
 
 import TripleLensing
 TRIL = TripleLensing.TripleLensing()
@@ -1120,3 +1127,212 @@ def muPoint(mlens, z, xsCenter, ysCenter, NLENS):
 
 def conj(z):
     return complex(z.real, -z.imag)
+
+def testing(ax, mlens, zlens, xsCenter, ysCenter, rs,
+                          nphi=2000, NPS=4000, secnum=360, basenum=5,
+                          scale=10, cl="blue", plot_false=True,
+                          full_trajectory=None):
+    
+    z = [ [zlens[0], zlens[1]], [zlens[2], zlens[3]], [zlens[4], zlens[5]] ]
+    nlens = len(mlens)
+    
+    # Get critical curves and caustics
+    critical, caustics = get_crit_caus(mlens, z, nlens, NPS=NPS)
+    crit_x = [pt[0] for pt in critical]
+    crit_y = [pt[1] for pt in critical]
+    caus_x = [pt[0] for pt in caustics]
+    caus_y = [pt[1] for pt in caustics]
+
+    # Get image positions
+    Phis = getphis_v3(mlens, z, xsCenter, ysCenter, rs, nphi, caus_x, caus_y,
+                      secnum=secnum, basenum=basenum, scale=scale)[0]
+    imgXS, imgYS, XS, YS, falseimgXS, falseimgYS = get_allimgs_v2(
+        mlens, z, xsCenter, ysCenter, rs, nlens, Phis)
+
+    # Plot components
+    ax.plot(crit_x, crit_y, '--', color='black', lw=1.2, label='Critical Curve')
+    ax.plot(caus_x, caus_y, '-', color='red', lw=1.2, label='Caustic')
+    ax.scatter(XS, YS, color="orange", marker='*', s=10, label="Source", zorder=3)
+    ax.scatter(imgXS, imgYS, color=cl, s=10, label="Images", zorder=4)
+
+    if plot_false:
+        ax.scatter(falseimgXS, falseimgYS, color="gray", s=10, alpha=0.3, label="False Images")
+
+    # Always plot lenses and other elements, regardless of plot_false
+    lens_x = [zlens[i] for i in range(0, len(zlens), 2)]
+    lens_y = [zlens[i+1] for i in range(0, len(zlens), 2)]
+    ax.scatter(lens_x, lens_y, color='black', s=40, label="Lenses", zorder=5)
+
+    # Optional: plot full source trajectory if provided
+    if full_trajectory is not None:
+        traj_x, traj_y = full_trajectory
+        ax.plot(traj_x, traj_y, '--', color='orange', lw=0.8, label="Source Trajectory")
+
+    # Axes labels and aspect ratio
+    ax.set_xlabel(r"$\theta_E$", fontsize=14)
+    ax.set_ylabel(r"$\theta_E$", fontsize=14)
+    ax.set_aspect("equal")
+
+    # Unique legend
+    handles, labels = ax.get_legend_handles_labels()
+    by_label = dict(zip(labels, handles))
+    ax.legend(by_label.values(), by_label.keys(), fontsize=8, loc='upper left')
+    
+def get_allimgs_with_mu(mlens, z, xsCenter, ysCenter, rs, NLENS, Phis):
+    XS, YS = [], []
+    imgXS, imgYS, imgMUs = [], [], []
+    falseimgXS, falseimgYS = [], []
+
+    for phi in Phis:
+        xs = xsCenter + rs * math.cos(phi)
+        ys = ysCenter + rs * math.sin(phi)
+        XS.append(xs)
+        YS.append(ys)
+
+        res = sol_len_equ_cpp(mlens, z, xs, ys, NLENS)
+        for i in range(DEGREE):
+            flag = trueSolution(mlens, z, xs, ys, res[i], cal_ang=False)
+            if flag[0]:
+                imgXS.append(res[i][0])
+                imgYS.append(res[i][1])
+                imgMUs.append(abs(flag[1]))  # take abs(magnification)
+            else:
+                falseimgXS.append(res[i][0])
+                falseimgYS.append(res[i][1])
+
+    return imgXS, imgYS, imgMUs, XS, YS, falseimgXS, falseimgYS
+
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+from IPython.display import HTML
+import TripleLensing
+from utils import get_crit_caus, getphis_v3, get_allimgs_with_mu, testing
+
+class ThreeLens1S:
+    def __init__(self, t0, tE, rho, u0_list, q2, q3, s2, s3, alpha_deg, psi_deg,
+                 rs, secnum, basenum, num_points):
+
+        self.t0 = t0
+        self.tE = tE
+        self.rho = rho
+        self.u0_list = u0_list
+        self.q2 = q2
+        self.q3 = q3
+        self.s2 = s2
+        self.s3 = s3
+        self.alpha_deg = alpha_deg
+        self.psi_deg = psi_deg
+        self.rs = rs
+        self.secnum = secnum
+        self.basenum = basenum
+        self.num_points = num_points
+
+        self.alpha_rad = np.radians(alpha_deg)
+        self.psi_rad = np.radians(psi_deg)
+        self.tau = np.linspace(-2, 2, num_points)
+        self.t = self.t0 + self.tau * self.tE
+
+        self.TRIL = TripleLensing.TripleLensing()
+        self.colors = [plt.colormaps['BuPu'](i) for i in np.linspace(1.0, 0.4, len(u0_list))]
+        self.systems = self._prepare_systems()
+
+    def get_lens_geometry(self):
+        m1 = 1 / (1 + self.q2 + self.q3)
+        m2 = self.q2 * m1
+        m3 = self.q3 * m1
+        mlens = [m1, m2, m3]
+        x1, y1 = 0.0, 0.0
+        x2, y2 = self.s2, 0.0
+        x3 = self.s3 * np.cos(self.psi_rad)
+        y3 = self.s3 * np.sin(self.psi_rad)
+        zlens = [x1, y1, x2, y2, x3, y3]
+        return mlens, zlens
+
+    def _prepare_systems(self):
+        systems = []
+        mlens, zlens = self.get_lens_geometry()
+        z = [[zlens[0], zlens[1]], [zlens[2], zlens[3]], [zlens[4], zlens[5]]]
+        critical, caustics = get_crit_caus(mlens, z, len(mlens))
+        caus_x = np.array([pt[0] for pt in caustics])
+        caus_y = np.array([pt[1] for pt in caustics])
+
+        for idx, u0 in enumerate(self.u0_list):
+            y1s = u0 * np.sin(self.alpha_rad) + self.tau * np.cos(self.alpha_rad)
+            y2s = u0 * np.cos(self.alpha_rad) - self.tau * np.sin(self.alpha_rad)
+
+            cent_x, cent_y = [], []
+            for i in range(self.num_points):
+                Phis = getphis_v3(mlens, z, y1s[i], y2s[i], self.rs, 2000, caus_x, caus_y,
+                                  secnum=self.secnum, basenum=self.basenum, scale=10)[0]
+                imgXS, imgYS, imgMUs, *_ = get_allimgs_with_mu(
+                    mlens, z, y1s[i], y2s[i], self.rs, len(mlens), Phis)
+
+                if len(imgMUs) == 0 or sum(imgMUs) == 0:
+                    cent_x.append(np.nan)
+                    cent_y.append(np.nan)
+                else:
+                    cx = np.sum(np.array(imgMUs) * np.array(imgXS)) / np.sum(imgMUs)
+                    cy = np.sum(np.array(imgMUs) * np.array(imgYS)) / np.sum(imgMUs)
+                    cent_x.append(cx)
+                    cent_y.append(cy)
+
+            systems.append({
+                'u0': u0,
+                'color': self.colors[idx],
+                'y1s': y1s,
+                'y2s': y2s,
+                'cent_x': np.array(cent_x),
+                'cent_y': np.array(cent_y),
+                'mlens': mlens,
+                'zlens': zlens
+            })
+
+        return systems
+
+    def plot_centroid_trajectory(self):
+        plt.figure(figsize=(6, 6))
+        for system in self.systems:
+            dx = system['cent_x'] - system['y1s']
+            dy = system['cent_y'] - system['y2s']
+            plt.plot(dx, dy, color=system['color'], label=fr"$u_0$ = {system['u0']}")
+        plt.xlabel(r"$\\delta x/\\theta_E$")
+        plt.ylabel(r"$\\delta y/\\theta_E$")
+        plt.title("Centroid Shift Trajectories")
+        plt.gca().set_aspect("equal")
+        plt.legend()
+        plt.grid(True)
+        plt.show()
+
+    def plot_total_shift_vs_time(self):
+        plt.figure(figsize=(8, 5))
+        for system in self.systems:
+            dx = system['cent_x'] - system['y1s']
+            dy = system['cent_y'] - system['y2s']
+            dtheta = np.sqrt(dx**2 + dy**2)
+            plt.plot(self.tau, dtheta, label=fr"$u_0$ = {system['u0']}", color=system['color'])
+        plt.xlabel(r"$\\tau$")
+        plt.ylabel(r"$|\\delta \\vec{\\Theta}|$")
+        plt.title("Centroid Shift vs Time")
+        plt.legend()
+        plt.grid(True)
+        plt.show()
+
+    def animate(self):
+        fig, ax = plt.subplots(figsize=(6, 6))
+
+        def update(i):
+            ax.cla()
+            ax.set_xlim(-2, 2)
+            ax.set_ylim(-2, 2)
+            ax.set_aspect("equal")
+            ax.set_title("Triple Lens Event Animation")
+            for system in self.systems:
+                testing(ax, system['mlens'], system['zlens'], system['y1s'][i], system['y2s'][i], self.rs,
+                        secnum=self.secnum, basenum=self.basenum,
+                        full_trajectory=(system['y1s'], system['y2s']), cl=system['color'])
+            return ax,
+
+        ani = FuncAnimation(fig, update, frames=self.num_points, blit=False)
+        plt.close(fig)
+        return HTML(ani.to_jshtml())
