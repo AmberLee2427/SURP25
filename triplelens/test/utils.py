@@ -1304,7 +1304,7 @@ class ThreeLens1S:
         plt.grid(True)
         plt.show()
 
-    def plot_total_shift_vs_time(self):
+    def plot_shift_vs_time(self):
         plt.figure(figsize=(8, 5))
         for system in self.systems:
             dx = system['cent_x'] - system['y1s']
