@@ -841,7 +841,216 @@ class ThreeLens1S:
         plt.tight_layout()
         plt.show()
 
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
+from matplotlib.animation import FuncAnimation
+from IPython.display import HTML
 
+import VBMicrolensing
+import TripleLensing
+from TestML import get_crit_caus, getphis_v3, get_allimgs_with_mu
 
+class UnifiedTripleLens:
+    def __init__(self, t0, tE, rho, u0_list, q2, q3, s2, s3, alpha_deg, psi_deg, secnum=360, basenum=5, num_points=100):
+        self.t0 = t0
+        self.tE = tE
+        self.rho = rho
+        self.u0_list = u0_list
+        self.q2 = q2
+        self.q3 = q3
+        self.s2 = s2
+        self.s3 = s3
+        self.alpha = np.radians(alpha_deg)
+        self.psi = np.radians(psi_deg)
+        self.alpha_deg = alpha_deg
+        self.psi_deg = psi_deg
+        self.secnum = secnum
+        self.basenum = basenum
+        self.num_points = num_points
 
+        self.tau = np.linspace(-2, 2, num_points)
+        self.t = self.t0 + self.tau * self.tE
+        self.colors = [plt.colormaps['BuPu'](i) for i in np.linspace(1.0, 0.4, len(u0_list))]
 
+        self.VBM = VBMicrolensing.VBMicrolensing()
+        self.VBM.RelTol = 1e-3
+        self.VBM.Tol = 1e-3
+        self.VBM.astrometry = True
+        self.VBM.SetMethod(self.VBM.Method.Nopoly)
+
+        self.TRIL = TripleLensing.TripleLensing()
+        self.systems = self._prepare_systems()
+
+    def get_lens_geometry(self):
+        m1 = 1 / (1 + self.q2 + self.q3)
+        m2 = self.q2 * m1
+        m3 = self.q3 * m1
+        mlens = [m1, m2, m3]
+        x1, y1 = 0, 0
+        x2, y2 = self.s2, 0
+        x3 = self.s3 * np.cos(self.psi)
+        y3 = self.s3 * np.sin(self.psi)
+        zlens = [x1, y1, x2, y2, x3, y3]
+        return mlens, zlens
+
+    def _prepare_systems(self):
+        systems = []
+
+        # Adjust s3 and psi for VBM convention (lens 3 relative to lens 2)
+        x3 = self.s3 * np.cos(self.psi)
+        y3 = self.s3 * np.sin(self.psi)
+        dx = x3 - self.s2
+        dy = y3 - 0
+        s3_vbm = np.sqrt(dx**2 + dy**2)
+        psi_vbm = np.degrees(np.arctan2(dy, dx))
+
+        for idx, u0 in enumerate(self.u0_list):
+            param_vec = [
+                np.log(self.s2), np.log(self.q2), u0, self.alpha_deg,
+                np.log(self.rho), np.log(self.tE), self.t0,
+                np.log(s3_vbm), np.log(self.q3), psi_vbm
+            ]
+            mag, *_ = self.VBM.TripleLightCurve(param_vec, self.t)
+
+            y1s = u0 * np.sin(self.alpha) + self.tau * np.cos(self.alpha)
+            y2s = u0 * np.cos(self.alpha) - self.tau * np.sin(self.alpha)
+
+            systems.append({
+                'u0': u0,
+                'color': self.colors[idx],
+                'mag': mag,
+                'y1s': y1s,
+                'y2s': y2s,
+                'cent_x': [],
+                'cent_y': [],
+                'images': []
+            })
+        return systems
+
+    def compute_centroids_with_triple_lensing(self):
+        mlens, zlens = self.get_lens_geometry()
+        z = [[zlens[0], zlens[1]], [zlens[2], zlens[3]], [zlens[4], zlens[5]]]
+        causics = get_crit_caus(mlens, z, 3)[1]
+        caus_x = [pt[0] for pt in causics]
+        caus_y = [pt[1] for pt in causics]
+
+        for system in self.systems:
+            cx_list, cy_list = [], []
+            image_sequence = []
+            for x_src, y_src in zip(system['y1s'], system['y2s']):
+                Phis = getphis_v3(mlens, z, x_src, y_src, self.rho, 2000, caus_x, caus_y,
+                                  secnum=self.secnum, basenum=self.basenum)[0]
+                imgXS, imgYS, imgMUs, *_ = get_allimgs_with_mu(mlens, z, x_src, y_src, self.rho, 3, Phis)
+                image_sequence.append((imgXS, imgYS))
+
+                if len(imgMUs) == 0 or np.sum(imgMUs) == 0:
+                    cx_list.append(np.nan)
+                    cy_list.append(np.nan)
+                else:
+                    cx = np.sum(np.array(imgMUs) * np.array(imgXS)) / np.sum(imgMUs)
+                    cy = np.sum(np.array(imgMUs) * np.array(imgYS)) / np.sum(imgMUs)
+                    cx_list.append(cx)
+                    cy_list.append(cy)
+
+            system['cent_x'] = np.array(cx_list)
+            system['cent_y'] = np.array(cy_list)
+            system['images'] = image_sequence
+
+    def plot_caustics_and_criticals(self):
+        param_vec = [
+            np.log(self.s2), np.log(self.q2), self.u0_list[0], np.degrees(self.alpha),
+            np.log(self.rho), np.log(self.tE), self.t0,
+            np.log(self.s3), np.log(self.q3), np.degrees(self.psi)
+        ]
+        _ = self.VBM.TripleLightCurve(param_vec, self.t)
+        caustics = self.VBM.Multicaustics()
+        criticals = self.VBM.Multicriticalcurves()
+
+        plt.figure(figsize=(6, 6))
+        for c in caustics:
+            plt.plot(c[0], c[1], 'r', label="Caustic")
+        for c in criticals:
+            plt.plot(c[0], c[1], 'k--', label="Critical")
+
+        for s in self.systems:
+            plt.plot(s['y1s'], s['y2s'], '--', color=s['color'], label=f"u0 = {s['u0']:.3f}")
+
+        mlens, zlens = self.get_lens_geometry()
+        for i in range(0, len(zlens), 2):
+            plt.plot(zlens[i], zlens[i+1], 'ko')
+
+        plt.gca().set_aspect('equal')
+        plt.grid(True)
+        plt.title("Caustics and Critical Curves (VBM)")
+        plt.xlabel("x")
+        plt.ylabel("y")
+        plt.tight_layout()
+        plt.show()
+
+    def plot_light_curve(self):
+        plt.figure()
+        for s in self.systems:
+            plt.plot(self.tau, s['mag'], color=s['color'], label=f"$u_0$ = {s['u0']}")
+        plt.xlabel(r"$\tau$")
+        plt.ylabel("Magnification")
+        plt.title("Triple Lens Light Curve (VBM)")
+        plt.grid(True)
+        plt.legend()
+        plt.tight_layout()
+        plt.show()
+
+    def plot_centroid_trajectories(self):
+        plt.figure()
+        for s in self.systems:
+            dx = s['cent_x'] - s['y1s']
+            dy = s['cent_y'] - s['y2s']
+            plt.plot(dx, dy, label=f"$u_0$ = {s['u0']:.3f}", color=s['color'])
+        plt.xlabel(r"$\delta x$")
+        plt.ylabel(r"$\delta y$")
+        plt.title("Centroid Shift Trajectories")
+        plt.gca().set_aspect('equal')
+        plt.grid(True)
+        plt.legend()
+        plt.tight_layout()
+        plt.show()
+
+    def plot_centroid_wobble(self):
+        plt.figure()
+        for s in self.systems:
+            dx = s['cent_x'] - s['y1s']
+            dy = s['cent_y'] - s['y2s']
+            wobble = np.sqrt(dx**2 + dy**2)
+            plt.plot(self.tau, wobble, label=f"$u_0$ = {s['u0']:.3f}", color=s['color'])
+        plt.xlabel(r"$\tau$")
+        plt.ylabel(r"$|\delta \vec{\theta}|$")
+        plt.title("Centroid Wobble vs Time")
+        plt.grid(True)
+        plt.legend()
+        plt.tight_layout()
+        plt.show()
+
+    def animate(self, show_images=True, show_centroids=False):
+        fig, ax = plt.subplots(figsize=(6, 6))
+
+        def update(i):
+            ax.clear()
+            ax.set_xlim(-2, 2)
+            ax.set_ylim(-2, 2)
+            ax.set_aspect("equal")
+            ax.set_title(f"Triple Lens Animation (Frame {i})")
+
+            for s in self.systems:
+                ax.plot(s['y1s'], s['y2s'], '--', color=s['color'], alpha=0.3)
+                ax.plot(s['y1s'][i], s['y2s'][i], '*', color=s['color'])
+                if show_images:
+                    imgXS, imgYS = s['images'][i]
+                    ax.plot(imgXS, imgYS, 'o', color='gray', markersize=4)
+                if show_centroids:
+                    ax.plot(s['cent_x'][:i+1], s['cent_y'][:i+1], '-', color=s['color'])
+
+            return ax,
+
+        ani = FuncAnimation(fig, update, frames=self.num_points, interval=100, blit=False)
+        plt.close(fig)
+        return HTML(ani.to_jshtml())
