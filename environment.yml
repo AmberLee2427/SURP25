@@ -1,0 +1,29 @@
+name: GCMicrolensing
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.12
+  - numpy=2.2.1
+  - matplotlib=3.10.0
+  - pandas
+  - scipy
+  - seaborn
+  - astropy
+  - astroquery
+  - pyvo
+  - emcee
+  - corner
+  - requests
+  - tqdm
+  - pybind11
+  - jupyter
+  - jupyterlab
+  - ipython
+  - ipykernel
+  - ipywidgets
+  - ipympl=0.9.6
+  - ipydatagrid
+  - pip
+  - pip:
+      - VBMicrolensing
