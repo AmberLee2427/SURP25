@@ -574,7 +574,7 @@ class TwoLens1S:
         plt.close(fig)
         return HTML(ani.to_jshtml())
     
-class ThreeLens1S:
+class ThreeLens1SVBM:
     def __init__(self, t0, tE, rho, u0_list, q2, q3, s12, s23, alpha, psi):
         self.t0 = t0
         self.tE = tE
@@ -585,11 +585,11 @@ class ThreeLens1S:
         self.s12 = s12
         self.s23 = s23
         self.alpha = alpha
-        self.psi = psi
-        self.tau = np.linspace(-4, 4, 100)
+        self.tau = np.linspace(-2, 2, 100)
         self.t = self.t0 + self.tau * self.tE
         self.theta = np.radians(self.alpha)
-        self.psi_rad = np.radians(self.psi)
+        self.psi = psi
+        self.phi = np.radians(self.psi)
 
         self.VBM = VBMicrolensing.VBMicrolensing()
         self.VBM.RelTol = 1e-3
@@ -606,7 +606,7 @@ class ThreeLens1S:
             param_vec = [
                 np.log(self.s12), np.log(self.q2), u0, self.alpha,
                 np.log(self.rho), np.log(self.tE), self.t0,
-                np.log(self.s23), np.log(self.q3), self.psi
+                np.log(self.s23), np.log(self.q3), self.phi
             ]
 
             mag, *_ = self.VBM.TripleLightCurve(param_vec, self.t)
@@ -625,20 +625,18 @@ class ThreeLens1S:
         return systems
 
     def _setting_parameters(self):
-        """
-        """
         param = [
             np.log(self.s12), np.log(self.q2), self.u0_list[0], self.alpha,
             np.log(self.rho), np.log(self.tE), self.t0,
-            np.log(self.s23), np.log(self.q3), self.psi
+            np.log(self.s23), np.log(self.q3), self.phi
         ]
         _ = self.VBM.TripleLightCurve(param, self.t)
 
     def _compute_lens_positions(self):
         x1, y1 = 0, 0
         x2, y2 = x1 + self.s12, y1
-        x3 = x2 + self.s23 * np.cos(self.psi_rad)
-        y3 = y2 + self.s23 * np.sin(self.psi_rad)
+        x3 = self.s23 * np.cos(self.phi)
+        y3 = self.s23 * np.sin(self.phi)
         return [(x1, y1), (x2, y2), (x3, y3)]
     
     def _calculate_image_positions(self, xs, ys):
@@ -709,90 +707,6 @@ class ThreeLens1S:
         plt.tight_layout()
         plt.show()
 
-    def animate(self):
-        self._setting_parameters()
-        caustics = self.VBM.Multicaustics()
-        criticalcurves = self.VBM.Multicriticalcurves()
-        lens_positions = self._compute_lens_positions()
-
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
-        fig.subplots_adjust(wspace=0.4)
-
-        lens_handle = Line2D([0], [0], marker='o', color='k', linestyle='None', label='Lens', markersize=6)
-        caustic_handle = Line2D([0], [0], color='r', lw=1.2, label='Caustic')
-        crit_curve_handle = Line2D([0], [0], color='k', linestyle='--', lw=0.8, label='Critical Curve')
-
-        ax1.set_xlim(-2, 2)
-        ax1.set_ylim(-2, 2)
-        ax1.set_xlabel(r"$\theta_x$ ($\theta_E$)")
-        ax1.set_ylabel(r"$\theta_y$ ($\theta_E$)")
-        ax1.set_title("3L1S Microlensing Event")
-        ax1.set_aspect("equal")
-        ax1.grid(True)
-
-        for cau in caustics:
-            ax1.plot(cau[0], cau[1], 'r', lw=1.2)
-        for crit in criticalcurves:
-            ax1.plot(crit[0], crit[1], 'k--', lw=0.8)
-        for x, y in lens_positions:
-            ax1.plot(x, y, 'ko')
-
-        source_dots = []
-        image_dots = []
-        for system in self.systems:
-            ax1.plot(system['x_src'], system['y_src'], '--', color=system['color'], alpha=0.4)
-            src_dot, = ax1.plot([], [], '*', color=system['color'], markersize=10)
-            dots = [ax1.plot([], [], 'o', color='gray', markersize=4)[0] for _ in range(10)]
-            source_dots.append(src_dot)
-            image_dots.append(dots)
-
-        ax1.legend(handles=[lens_handle, caustic_handle, crit_curve_handle], loc='upper right', prop={'size': 8})
-
-        ax2.set_xlim(self.tau[0], self.tau[-1])
-        all_mag = np.concatenate([s['mag'] for s in self.systems])
-        ax2.set_ylim(min(all_mag) * 0.95, max(all_mag) * 1.05)
-        ax2.set_xlabel(r"Time ($\tau$)")
-        ax2.set_ylabel("Magnification")
-        ax2.set_title("Light Curve")
-
-        tracer_dots = []
-        for system in self.systems:
-            ax2.plot(self.tau, system['mag'], color=system['color'], label=f"$u_0$ = {system['u0']}")
-            dot, = ax2.plot([], [], 'o', color=system['color'], markersize=6)
-            tracer_dots.append(dot)
-        ax2.legend()
-
-        def update(i):
-            artists = []
-            for j, system in enumerate(self.systems):
-                x_src = system['x_src'][i]
-                y_src = system['y_src'][i]
-                source_dots[j].set_data([x_src], [y_src])
-                artists.append(source_dots[j])
-
-                images = self._calculate_image_positions(x_src, y_src)
-                verified_images = [img for img in images if self._true_solution(img, x_src, y_src)]
-
-                for k in range(len(image_dots[j])):
-                    if k < len(verified_images):
-                        image_dots[j][k].set_data([verified_images[k].real], [verified_images[k].imag])
-                    else:
-                        image_dots[j][k].set_data([], [])
-                    artists.append(image_dots[j][k])
-
-                tracer_dots[j].set_data([self.tau[i]], [system['mag'][i]])
-                artists.append(tracer_dots[j])
-
-                print(f"Frame {i}: Source = ({x_src:.3f}, {y_src:.3f})")
-                print(f"  Total images: {len(images)}")
-                print(f"  Verified images: {len(verified_images)}")
-
-            return artists
-        
-        ani = animation.FuncAnimation(fig, update, frames=len(self.t), interval=50, blit=True)
-        plt.close(fig)
-        return HTML(ani.to_jshtml())
-
     
 
     
@@ -810,7 +724,7 @@ class ThreeLens1S:
         ref_param = [
             np.log(self.s12), np.log(self.q2), self.u0_list[0], self.alpha,
             np.log(self.rho), np.log(self.tE), self.t0,
-            np.log(self.s23), np.log(ref_q3), self.psi
+            np.log(self.s23), np.log(ref_q3), self.phi
         ]
         ref_mag, *_ = self.VBM.TripleLightCurve(ref_param, self.t)
 
@@ -819,7 +733,7 @@ class ThreeLens1S:
             param_vec = [
                 np.log(self.s12), np.log(self.q2), self.u0_list[0], self.alpha,
                 np.log(self.rho), np.log(self.tE), self.t0,
-                np.log(self.s23), np.log(q3), self.psi
+                np.log(self.s23), np.log(q3), self.phi
             ]
             mag, *_ = self.VBM.TripleLightCurve(param_vec, self.t)
 
@@ -864,7 +778,6 @@ class UnifiedTripleLens:
         self.alpha = np.radians(alpha_deg)
         self.psi = np.radians(psi_deg)
         self.alpha_deg = alpha_deg
-        self.psi_deg = psi_deg
         self.secnum = secnum
         self.basenum = basenum
         self.num_points = num_points
