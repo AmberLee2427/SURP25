@@ -789,6 +789,9 @@ class ThreeLens1S:
         self.tau = np.linspace(-2, 2, num_points)
         self.t = self.t0 + self.tau * self.tE
 
+        self.highres_tau = np.linspace(-2, 2, 5 * self.num_points)
+        self.highres_t = self.t0 + self.highres_tau * self.tE
+
         self.TRIL = TripleLensing.TripleLensing()
         self.colors = [plt.colormaps['BuPu'](i) for i in np.linspace(1.0, 0.4, len(u0_list))]
         self.systems = self._prepare_systems()
@@ -853,6 +856,45 @@ class ThreeLens1S:
 
         return systems
     
+    def _prepare_highres_centroid(self):
+        systems = []
+        mlens, zlens = self.get_lens_geometry()
+        z = [[zlens[0], zlens[1]], [zlens[2], zlens[3]], [zlens[4], zlens[5]]]
+        critical, caustics = get_crit_caus(mlens, z, len(mlens))
+        caus_x = np.array([pt[0] for pt in caustics])
+        caus_y = np.array([pt[1] for pt in caustics])
+
+        for idx, u0 in enumerate(self.u0_list):
+            y1s = u0 * np.sin(self.alpha_rad) + self.highres_tau * np.cos(self.alpha_rad)
+            y2s = u0 * np.cos(self.alpha_rad) - self.highres_tau * np.sin(self.alpha_rad)
+
+            cent_x, cent_y = [], []
+            for i in range(len(self.highres_tau)):
+                Phis = getphis_v3(mlens, z, y1s[i], y2s[i], self.rs, 2000, caus_x, caus_y,
+                                secnum=self.secnum, basenum=self.basenum, scale=10)[0]
+                imgXS, imgYS, imgMUs, *_ = get_allimgs_with_mu(
+                    mlens, z, y1s[i], y2s[i], self.rs, len(mlens), Phis)
+
+                if len(imgMUs) == 0 or sum(imgMUs) == 0:
+                    cent_x.append(np.nan)
+                    cent_y.append(np.nan)
+                else:
+                    cx = np.sum(np.array(imgMUs) * np.array(imgXS)) / np.sum(imgMUs)
+                    cy = np.sum(np.array(imgMUs) * np.array(imgYS)) / np.sum(imgMUs)
+                    cent_x.append(cx)
+                    cent_y.append(cy)
+
+            systems.append({
+                'u0': u0,
+                'color': self.colors[idx],
+                'y1s': y1s,
+                'y2s': y2s,
+                'cent_x': np.array(cent_x),
+                'cent_y': np.array(cent_y),
+            })
+
+        return systems
+    
     def plot_caustics_and_critical(self):
         param = [
             np.log(self.s2), np.log(self.q2), self.u0_list[0], self.alpha_deg,
@@ -887,8 +929,8 @@ class ThreeLens1S:
                 np.log(self.rho), np.log(self.tE), self.t0,
                 np.log(self.s3), np.log(self.q3), self.psi_rad
             ]
-            mag, *_ = self.VBM.TripleLightCurve(param, self.t)
-            plt.plot(self.tau, mag, color=color, label=fr"$u_0$ = {u0}")
+            mag, *_ = self.VBM.TripleLightCurve(param, self.highres_t)
+            plt.plot(self.highres_tau, mag, color=color, label=fr"$u_0$ = {u0}")
         plt.xlabel(r"$\tau$")
         plt.ylabel("Magnification")
         plt.title("Triple Lens Light Curve (VBM)")
@@ -898,6 +940,7 @@ class ThreeLens1S:
         plt.show()    
 
     def plot_centroid_trajectory(self):
+        systems = self._prepare_highres_centroid()
         plt.figure(figsize=(6, 6))
         for system in self.systems:
             dx = system['cent_x'] - system['y1s']
@@ -912,6 +955,7 @@ class ThreeLens1S:
         plt.show()
 
     def plot_shift_vs_time(self):
+        systems = self._prepare_highres_centroid()
         plt.figure(figsize=(8, 5))
         for system in self.systems:
             dx = system['cent_x'] - system['y1s']
@@ -945,13 +989,12 @@ class ThreeLens1S:
         return HTML(ani.to_jshtml())
     
     def animate_combined(self):
-        # First, prepare the caustics and critical curves once using VBM
         param = [
             np.log(self.s2), np.log(self.q2), self.u0_list[0], self.alpha_deg,
             np.log(self.rho), np.log(self.tE), self.t0,
             np.log(self.s3), np.log(self.q3), self.psi_rad
         ]
-        _ = self.VBM.TripleLightCurve(param, self.t)  # set lens geometry
+        _ = self.VBM.TripleLightCurve(param, self.t) 
         caustics = self.VBM.Multicaustics()
         criticalcurves = self.VBM.Multicriticalcurves()
 
@@ -975,7 +1018,7 @@ class ThreeLens1S:
                 ax.plot(system['y1s'], system['y2s'], '--', color=system['color'], alpha=0.5)
 
                 # Plot source position at frame i
-                ax.plot(system['y1s'][i], system['y2s'][i], 'o', color=system['color'])
+                ax.plot(system['y1s'][i], system['y2s'][i], '*', color=system['color'])
 
                 # Plot the lens positions
                 zlens = system['zlens']
@@ -983,13 +1026,12 @@ class ThreeLens1S:
                 ax.plot(zlens[2], zlens[3], 'ko')
                 ax.plot(zlens[4], zlens[5], 'ko')
 
-                # Optional: Plot image positions (using TripleLensing)
                 imgXS, imgYS, imgMUs, *_ = get_allimgs_with_mu(
                     system['mlens'], [[zlens[0], zlens[1]], [zlens[2], zlens[3]], [zlens[4], zlens[5]]],
                     system['y1s'][i], system['y2s'][i], self.rs, len(system['mlens']),
                     getphis_v3(system['mlens'], [[zlens[0], zlens[1]], [zlens[2], zlens[3]], [zlens[4], zlens[5]]],
                             system['y1s'][i], system['y2s'][i], self.rs, 2000,
-                            np.array([pt[0] for pt in caustics[0]]),  # Just using 1st loop
+                            np.array([pt[0] for pt in caustics[0]]),  
                             np.array([pt[1] for pt in caustics[0]]),
                             secnum=self.secnum, basenum=self.basenum, scale=10)[0]
                 )
