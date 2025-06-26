@@ -166,7 +166,7 @@ class OneL1S:
         return HTML(ani.to_jshtml())
     
 class TwoLens1S:
-    def __init__(self, t0, tE, rho, u0_list, q, s, alpha):
+    def __init__(self, t0, tE, rho, u0_list, q, s, alpha, t_lc =None):
         self.t0 = t0
         self.tE = tE
         self.rho = rho
@@ -178,6 +178,14 @@ class TwoLens1S:
         self.t = self.t0 + self.tau * self.tE
         self.theta = np.radians(self.alpha)
 
+        if t_lc is not None:
+            self.t_lc = np.array(t_lc)              
+            self.tau_lc = (self.t_lc - self.t0) / self.tE
+        else:
+            self.tau = np.linspace(-4, 4, 100)
+            self.t_lc = self.t0 + self.tau * self.tE
+            self.tau_lc = self.tau
+                
         self.tau_hr = np.linspace(-4, 4, 1000)
         self.t_hr = self.t0 + self.tau_hr * self.tE
 
@@ -269,7 +277,7 @@ class TwoLens1S:
 
             mag, *_ = self.VBM.BinaryLightCurve(
                 [math.log(self.s), math.log(self.q), u0, self.theta, math.log(self.rho), math.log(self.tE), self.t0],
-                self.t)
+                self.t_lc)
 
             systems.append({
                 'u0': u0,
@@ -327,7 +335,7 @@ class TwoLens1S:
         plt.figure(figsize=(6, 4))
         
         for system in self.systems:
-            plt.plot(self.tau, system['mag'], color=system['color'], label=fr"$u_0$ = {system['u0']}")
+            plt.plot(self.tau_lc, system['mag'], color=system['color'], label=fr"$u_0$ = {system['u0']}")
         
         plt.xlabel(r"Time ($\tau$)")
         plt.ylabel("Magnification")
