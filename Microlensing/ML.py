@@ -394,7 +394,7 @@ class TwoLens1S:
 
         tracer_dots = []
         for system in self.systems:
-            ax2.plot(self.tau, system['mag'], color=system['color'], label=f"$u_0$ = {system['u0']}")
+            ax2.plot(self.tau_lc, system['mag'], color=system['color'], label=f"$u_0$ = {system['u0']}")
             dot, = ax2.plot([], [], 'o', color=system['color'], markersize=6)
             tracer_dots.append(dot)
         ax2.legend()
@@ -414,7 +414,7 @@ class TwoLens1S:
                 y_src = system['y_src'][i]
 
                 source_dots[j].set_data([x_src], [y_src])
-                tracer_dots[j].set_data([self.tau[i]], [system['mag'][i]])
+                tracer_dots[j].set_data([self.tau_lc[i]], [system['mag'][i]])
                 artists.extend([source_dots[j], tracer_dots[j]])
                 
                 images = self.VBM.ImageContours(self.s, self.q, x_src, y_src, self.rho)
@@ -430,7 +430,7 @@ class TwoLens1S:
 
             return artists
 
-        ani = animation.FuncAnimation(fig, update, frames=len(self.t), interval=50, blit=True)
+        ani = animation.FuncAnimation(fig, update, frames=100, interval=50, blit=True)
         plt.close(fig)
         return HTML(ani.to_jshtml())
     
