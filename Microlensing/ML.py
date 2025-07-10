@@ -174,7 +174,7 @@ class TwoLens1S:
         self.q = q
         self.s = s
         self.alpha = alpha
-        self.tau = np.linspace(-4, 4, 100)
+        self.tau = np.linspace(-4, 4, 1000)
         self.t = self.t0 + self.tau * self.tE
         self.theta = np.radians(self.alpha)
 
