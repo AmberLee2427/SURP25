@@ -382,7 +382,8 @@ class TwoLens1S:
             #cen_dot, = ax1.plot([], [], 'x', color=system['color'], markersize=6, label=f"$u_0$ = {system['u0']}")
             source_dots.append(src_dot)
             #centroid_dots.append(cen_dot)
-        ax1.legend(loc='lower right')
+        ax1.legend(handles=[lens_handle, caustic_handle, crit_curve_handle, q_handle, s_handle], loc='upper right', prop={'size': 8})
+
 
         
         ax2.set_xlim(self.tau[0], self.tau[-1])
@@ -432,6 +433,7 @@ class TwoLens1S:
 
         ani = animation.FuncAnimation(fig, update, frames=100, interval=50, blit=True)
         plt.close(fig)
+        self.last_animation = ani
         return HTML(ani.to_jshtml())
     
     def plot_centroid_trajectory(self):
@@ -440,8 +442,8 @@ class TwoLens1S:
             delta_x = system['cent_x_hr'] - system['x_src_hr']
             delta_y = system['cent_y_hr'] - system['y_src_hr']
             plt.plot(delta_x, delta_y, color=system['color'], label=fr"$u_0$ = {system['u0']}")
-        plt.xlim(-0.4, .8)    
-        plt.ylim(-0.4, 0.5)
+        #plt.xlim(-0.4, .8)    
+        #plt.ylim(-0.4, 0.5)
         plt.xlabel(r"$\delta \Theta_1$")
         plt.ylabel(r"$\delta \Theta_2$")
         plt.gca().set_aspect("equal")
