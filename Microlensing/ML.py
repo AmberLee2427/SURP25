@@ -373,6 +373,10 @@ class TwoLens1S:
 
         x1 = -self.s * self.q / (1 + self.q)
         x2 = self.s / (1 + self.q)
+
+        ax1.plot(x1, 0, 'ko', markersize=4)
+        ax1.plot(x2, 0, 'ko', markersize=4)
+
         ax1.legend(handles=[lens_handle, caustic_handle, crit_curve_handle, q_handle, s_handle], loc='upper right', prop={'size': 8})
 
         source_dots, centroid_dots = [], []
