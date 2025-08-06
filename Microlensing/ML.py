@@ -72,7 +72,9 @@ class OneL1S:
         plt.show()
 
     def animate(self):
-        return self._create_animation(figsize=(6, 6), layout='single')
+        ani = self._create_animation(figsize=(6, 6), layout='single')
+        self.last_animation = ani
+        return ani
 
     def show_all(self):
         return self._create_animation(figsize=(14, 6), layout='grid')
@@ -161,9 +163,10 @@ class OneL1S:
 
             return source_dots + img_dots + trails_1 + trails_2
 
-        ani = animation.FuncAnimation(fig, update, frames=n, interval=50, blit=True)
-        plt.tight_layout()
-        return HTML(ani.to_jshtml())
+        ani = animation.FuncAnimation(fig, update, frames=len(self.tau), interval=50, blit=True)
+        plt.close(fig)
+        self.last_animation = ani
+        return ani
     
 class TwoLens1S:
     def __init__(self, t0, tE, rho, u0_list, q, s, alpha, t_lc =None):
@@ -1057,4 +1060,7 @@ class ThreeLens1S:
 
         ani = FuncAnimation(fig, update, frames=self.num_points, blit=False)
         plt.close(fig)
-        return HTML(ani.to_jshtml())
+        self.last_animation = ani  # Optional but useful
+        return ani
+    
+        
