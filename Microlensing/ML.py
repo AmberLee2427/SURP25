@@ -278,6 +278,42 @@ class TwoLens1S:
                 cent_x_hr.append(cx_weighted)
                 cent_y_hr.append(cy_weighted)
 
+            # Compute centroid at light curve times (t_lc / tau_lc)
+            x_src_lc = self.tau_lc * np.cos(self.theta) - u0 * np.sin(self.theta)
+            y_src_lc = self.tau_lc * np.sin(self.theta) + u0 * np.cos(self.theta)
+
+            cent_x_lc = []
+            cent_y_lc = []
+
+            for x_s, y_s in zip(x_src_lc, y_src_lc):
+                images = self.VBM.ImageContours(self.s, self.q, x_s, y_s, self.rho)
+
+                image_fluxes, image_cx, image_cy = [], [], []
+
+                for img in images:
+                    x = np.array(img[0])
+                    y = np.array(img[1])
+                    flux = polygon_area(x, y)
+
+                    if flux > 0:
+                        cx = np.mean(x)
+                        cy = np.mean(y)
+                        image_fluxes.append(flux)
+                        image_cx.append(cx)
+                        image_cy.append(cy)
+
+                total_flux = np.sum(image_fluxes)
+
+                if total_flux > 0:
+                    cx_weighted = np.sum(np.array(image_cx) * image_fluxes) / total_flux
+                    cy_weighted = np.sum(np.array(image_cy) * image_fluxes) / total_flux
+                else:
+                    cx_weighted = np.nan
+                    cy_weighted = np.nan
+
+                cent_x_lc.append(cx_weighted)
+                cent_y_lc.append(cy_weighted)
+
             mag, *_ = self.VBM.BinaryLightCurve(
                 [math.log(self.s), math.log(self.q), u0, self.theta, math.log(self.rho), math.log(self.tE), self.t0],
                 self.t_lc)
@@ -294,6 +330,10 @@ class TwoLens1S:
                 'y_src_hr': y_src_hr,
                 'cent_x_hr': np.array(cent_x_hr),
                 'cent_y_hr': np.array(cent_y_hr),
+                'x_src_lc': x_src_lc,
+                'y_src_lc': y_src_lc,
+                'cent_x_lc': np.array(cent_x_lc),
+                'cent_y_lc': np.array(cent_y_lc),
             })
 
         return systems
