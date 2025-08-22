@@ -10,19 +10,56 @@ from matplotlib.lines import Line2D
 
 class OneL1S:
     def __init__(self, t0, tE, rho, u0_list):
-
-        self.t0 = t0
-        self.tE = tE
-        self.t = np.linspace(t0-tE, t0+tE, 50)
-        self.rho = rho
-        self.u0_list = u0_list
-        self.tau = (self.t - t0) / tE
+        self.t0, self.tE, self.rho, self.u0_list = t0, tE, rho, u0_list
+        self.tau = np.linspace(-4, 4, 200)
+        self.t = self.t0 + self.tau * self.tE
+        self.tau_hr = np.linspace(-4, 4, 1000)
+        self.t_hr = self.t0 + self.tau_hr * self.tE
 
         self.VBM = VBMicrolensing.VBMicrolensing()
         self.VBM.RelTol = 1e-3
         self.VBM.Tol = 1e-3
         self.VBM.astrometry = True
 
+        self.colors = [plt.colormaps['BuPu'](i) for i in np.linspace(1.0, 0.4, len(u0_list))]
+        self.systems = self._prepare_systems_single()
+
+    def _prepare_systems_single(self):
+        systems = []
+        for u0, color in zip(self.u0_list, self.colors):
+            # source track (high-res)
+            x_src_hr = self.tau_hr
+            y_src_hr = np.full_like(self.tau_hr, u0)
+            u = np.sqrt(x_src_hr**2 + y_src_hr**2)
+            theta = np.arctan2(y_src_hr, x_src_hr)
+
+            # analytic 1L1S images (in θ_E units)
+            sqrt_term = np.sqrt(u**2 + 4.0)
+            r_plus  = 0.5 * (u + sqrt_term)
+            r_minus = 0.5 * (u - sqrt_term)
+
+            # magnifications of each image
+            A_tot = (u**2 + 2.0) / (u * sqrt_term)
+            A_plus  = 0.5 * (A_tot + 1.0)
+            A_minus = 0.5 * (A_tot - 1.0)
+
+            # flux-weighted centroid radius along the same angle θ
+            r_cent = (A_plus * r_plus + A_minus * r_minus) / (A_plus + A_minus)
+
+            # vector centroid (relative to lens at origin)
+            cent_x_hr = r_cent * np.cos(theta)
+            cent_y_hr = r_cent * np.sin(theta)
+
+            systems.append({
+                'u0': u0,
+                'color': color,
+                'x_src_hr': x_src_hr,
+                'y_src_hr': y_src_hr,
+                'cent_x_hr': cent_x_hr,
+                'cent_y_hr': cent_y_hr,
+            })
+        return systems
+    
     def plot_light_curve_on_ax(self, ax):
         cmap_es = plt.colormaps['BuPu']
         colors_es = [cmap_es(i) for i in np.linspace(0.5, 1.0, len(self.u0_list))]
