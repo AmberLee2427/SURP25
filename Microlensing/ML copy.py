@@ -206,134 +206,171 @@ class OneL1S:
         return ani
     
 class TwoLens1S:
-    def __init__(self, t0, tE, rho, u0_list, q, s, alpha, t_lc=None, a1=0.0):
-        self.t0 = float(t0)
-        self.tE = float(tE)
-        self.rho = float(rho)
-        self.u0_list = list(u0_list)
-        self.q = float(q)
-        self.s = float(s)
-        self.alpha = float(alpha)
+    def __init__(self, t0, tE, rho, u0_list, q, s, alpha, t_lc =None):
+        self.t0 = t0
+        self.tE = tE
+        self.rho = rho
+        self.u0_list = u0_list
+        self.q = q
+        self.s = s
+        self.alpha = alpha
+        self.tau = np.linspace(-4, 4, 1000)
+        self.t = self.t0 + self.tau * self.tE
         self.theta = np.radians(self.alpha)
 
-        self.tau = np.linspace(-4, 4, 1000)
-        self.t    = self.t0 + self.tau * self.tE
-        self.tau_hr = np.linspace(-4, 4, 1000)
-        self.t_hr   = self.t0 + self.tau_hr * self.tE
-
         if t_lc is not None:
-            self.t_lc = np.asarray(t_lc, dtype=float)
+            self.t_lc = np.array(t_lc)              
             self.tau_lc = (self.t_lc - self.t0) / self.tE
         else:
-            self.tau_lc = np.linspace(-4, 4, 200)
-            self.t_lc   = self.t0 + self.tau_lc * self.tE
+            self.tau = np.linspace(-4, 4, 100)
+            self.t_lc = self.t0 + self.tau * self.tE
+            self.tau_lc = self.tau
+                
+        self.tau_hr = np.linspace(-4, 4, 1000)
+        self.t_hr = self.t0 + self.tau_hr * self.tE
 
-        # Limb darkening
-        self.a1 = float(a1) if a1 is not None else 0.0  
-        self.n_rings = 24
-
-        
         self.VBM = VBMicrolensing.VBMicrolensing()
         self.VBM.RelTol = 1e-3
-        self.VBM.Tol    = 1e-3
+        self.VBM.Tol = 1e-3
         self.VBM.astrometry = True
-        
-        try:
-            self.VBM.SetLDprofile(self.VBM.LDlinear)
-        except AttributeError:
-            self.VBM.SetLDprofile(self.VBM.LDprofiles.LDlinear)
-        self.VBM.a1 = self.a1
-
-        
-        self.colors = [plt.colormaps['BuPu'](i) for i in np.linspace(1.0, 0.4, len(self.u0_list))]
+        self.colors = [plt.colormaps['BuPu'](i) for i in np.linspace(1.0, 0.4, len(u0_list))]
         self.systems = self._prepare_systems()
-
-    @staticmethod
-    def _poly_area(x, y):
-        x = np.asarray(x); y = np.asarray(y)
-        return 0.5 * np.abs(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1)))
-
-    def _uniform_cumulants(self, y1, y2, r_eff):
-        
-        SA = SAx = SAy = 0.0
-        for img in self.VBM.ImageContours(self.s, self.q, y1, y2, r_eff):
-            x = np.asarray(img[0]); y = np.asarray(img[1])
-            A = self._poly_area(x, y)
-            if A > 0:
-                cx, cy = np.mean(x), np.mean(y)
-                SA  += A
-                SAx += A * cx
-                SAy += A * cy
-        return SA, SAx, SAy
-
-    def _centroid_at(self, y1, y2):
-        
-        # Uniform, fast path
-        if self.a1 <= 0:
-            SA, SAx, SAy = self._uniform_cumulants(y1, y2, self.rho)
-            return (SAx/SA, SAy/SA) if SA > 0 else (np.nan, np.nan)
-
-        radii = np.linspace(0.0, self.rho, self.n_rings + 1)
-        cum = [self._uniform_cumulants(y1, y2, r) for r in radii]
-
-        Nx = Ny = D = 0.0
-        for k in range(1, len(radii)):
-            r_in, r_out = radii[k-1], radii[k]
-            SAo, SAxo, SAyo = cum[k]
-            SAi, SAxi, SAyi = cum[k-1]
-            dSA  = SAo  - SAi
-            if dSA == 0:
-                continue
-            dSAx = SAxo - SAxi
-            dSAy = SAyo - SAyi
-
-            rmid = 0.5 * (r_in + r_out)
-            mu   = np.sqrt(max(0.0, 1.0 - (rmid / self.rho)**2))
-            I    = 1.0 - self.a1 * (1.0 - mu)   #linear
-
-           
-            Nx += I * dSAx
-            Ny += I * dSAy
-            D  += I * dSA
-
-        return (Nx/D, Ny/D) if D > 0 else (np.nan, np.nan)
-    
 
     def _prepare_systems(self):
         systems = []
 
-        for u0, color in zip(self.u0_list, self.colors):
-            
-            x_src    = self.tau    * np.cos(self.theta) - u0 * np.sin(self.theta)
-            y_src    = self.tau    * np.sin(self.theta) + u0 * np.cos(self.theta)
-            x_src_hr = self.tau_hr * np.cos(self.theta) - u0 * np.sin(self.theta)
+        def polygon_area(x, y):
+            return 0.5 * np.abs(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1)))
+
+        for u0, color in zip(self.u0_list, self.colors): 
+            x_src = self.tau * np.cos(self.theta) - u0 * np.sin(self.theta) #for animation (lower resolution) 
+            y_src = self.tau * np.sin(self.theta) + u0 * np.cos(self.theta)
+
+            cent_x = []
+            cent_y = []
+
+            for x_s, y_s in zip(x_src, y_src):
+                images = self.VBM.ImageContours(self.s, self.q, x_s, y_s, self.rho)
+
+                image_fluxes = []
+                image_cx = []
+                image_cy = []
+
+                for img in images:
+                    x = np.array(img[0])
+                    y = np.array(img[1])
+                    flux = polygon_area(x, y)
+
+                    if flux > 0:
+                        cx = np.mean(x)
+                        cy = np.mean(y)
+                        image_fluxes.append(flux)
+                        image_cx.append(cx)
+                        image_cy.append(cy)
+
+                total_flux = np.sum(image_fluxes)
+
+                if total_flux > 0:
+                    cx_weighted = np.sum(np.array(image_cx) * image_fluxes) / total_flux
+                    cy_weighted = np.sum(np.array(image_cy) * image_fluxes) / total_flux
+                else:
+                    cx_weighted = np.nan
+                    cy_weighted = np.nan
+
+                cent_x.append(cx_weighted)
+                cent_y.append(cy_weighted)
+
+            x_src_hr = self.tau_hr * np.cos(self.theta) - u0 * np.sin(self.theta) #for centroid shift, higher resolution
             y_src_hr = self.tau_hr * np.sin(self.theta) + u0 * np.cos(self.theta)
+
+            cent_x_hr = []
+            cent_y_hr = []
+
+            for x_s, y_s in zip(x_src_hr, y_src_hr):
+                images = self.VBM.ImageContours(self.s, self.q, x_s, y_s, self.rho)
+
+                image_fluxes, image_cx, image_cy = [], [], []
+
+                for img in images:
+                    x = np.array(img[0])
+                    y = np.array(img[1])
+                    flux = polygon_area(x, y)
+
+                    if flux > 0:
+                        cx = np.mean(x)
+                        cy = np.mean(y)
+                        image_fluxes.append(flux)
+                        image_cx.append(cx)
+                        image_cy.append(cy)
+
+                total_flux = np.sum(image_fluxes)
+
+                if total_flux > 0:
+                    cx_weighted = np.sum(np.array(image_cx) * image_fluxes) / total_flux
+                    cy_weighted = np.sum(np.array(image_cy) * image_fluxes) / total_flux
+                else:
+                    cx_weighted = np.nan
+                    cy_weighted = np.nan
+
+                cent_x_hr.append(cx_weighted)
+                cent_y_hr.append(cy_weighted)
+
+            # Compute centroid at light curve times (t_lc / tau_lc)
             x_src_lc = self.tau_lc * np.cos(self.theta) - u0 * np.sin(self.theta)
             y_src_lc = self.tau_lc * np.sin(self.theta) + u0 * np.cos(self.theta)
 
-            cent_x    = [self._centroid_at(x, y)[0] for x, y in zip(x_src,    y_src)]
-            cent_y    = [self._centroid_at(x, y)[1] for x, y in zip(x_src,    y_src)]
-            cent_x_hr = [self._centroid_at(x, y)[0] for x, y in zip(x_src_hr, y_src_hr)]
-            cent_y_hr = [self._centroid_at(x, y)[1] for x, y in zip(x_src_hr, y_src_hr)]
-            cent_x_lc = [self._centroid_at(x, y)[0] for x, y in zip(x_src_lc, y_src_lc)]
-            cent_y_lc = [self._centroid_at(x, y)[1] for x, y in zip(x_src_lc, y_src_lc)]
+            cent_x_lc = []
+            cent_y_lc = []
+
+            for x_s, y_s in zip(x_src_lc, y_src_lc):
+                images = self.VBM.ImageContours(self.s, self.q, x_s, y_s, self.rho)
+
+                image_fluxes, image_cx, image_cy = [], [], []
+
+                for img in images:
+                    x = np.array(img[0])
+                    y = np.array(img[1])
+                    flux = polygon_area(x, y)
+
+                    if flux > 0:
+                        cx = np.mean(x)
+                        cy = np.mean(y)
+                        image_fluxes.append(flux)
+                        image_cx.append(cx)
+                        image_cy.append(cy)
+
+                total_flux = np.sum(image_fluxes)
+
+                if total_flux > 0:
+                    cx_weighted = np.sum(np.array(image_cx) * image_fluxes) / total_flux
+                    cy_weighted = np.sum(np.array(image_cy) * image_fluxes) / total_flux
+                else:
+                    cx_weighted = np.nan
+                    cy_weighted = np.nan
+
+                cent_x_lc.append(cx_weighted)
+                cent_y_lc.append(cy_weighted)
 
             mag, *_ = self.VBM.BinaryLightCurve(
-                [math.log(self.s), math.log(self.q), u0, self.theta,
-                 math.log(self.rho), math.log(self.tE), self.t0],
-                self.t_lc
-            )
+                [math.log(self.s), math.log(self.q), u0, self.theta, math.log(self.rho), math.log(self.tE), self.t0],
+                self.t_lc)
 
             systems.append({
-                "u0": u0,
-                "color": color,
-                "mag": np.asarray(mag),
-                "x_src": x_src, "y_src": y_src,
-                "cent_x": np.asarray(cent_x), "cent_y": np.asarray(cent_y),
-                "x_src_hr": x_src_hr, "y_src_hr": y_src_hr,
-                "cent_x_hr": np.asarray(cent_x_hr), "cent_y_hr": np.asarray(cent_y_hr),
-                "x_src_lc": x_src_lc, "y_src_lc": y_src_lc,
-                "cent_x_lc": np.asarray(cent_x_lc), "cent_y_lc": np.asarray(cent_y_lc),
+                'u0': u0,
+                'color': color,
+                'mag': mag,
+                'x_src': x_src,
+                'y_src': y_src,
+                'cent_x': np.array(cent_x),
+                'cent_y': np.array(cent_y),
+                'x_src_hr': x_src_hr,
+                'y_src_hr': y_src_hr,
+                'cent_x_hr': np.array(cent_x_hr),
+                'cent_y_hr': np.array(cent_y_hr),
+                'x_src_lc': x_src_lc,
+                'y_src_lc': y_src_lc,
+                'cent_x_lc': np.array(cent_x_lc),
+                'cent_y_lc': np.array(cent_y_lc),
             })
 
         return systems
@@ -432,9 +469,10 @@ class TwoLens1S:
         ax1.legend(handles=[lens_handle, caustic_handle, crit_curve_handle, q_handle, s_handle], loc='upper right', prop={'size': 8})
 
 
-        ax2.set_xlim(self.tau_lc[0], self.tau_lc[-1])
+        
+        ax2.set_xlim(self.tau[0], self.tau[-1])
         all_mag = np.concatenate([s['mag'] for s in self.systems])
-        ax2.set_ylim(float(all_mag.min())*0.95, float(all_mag.max())*1.05)
+        ax2.set_ylim(min(all_mag)*0.95, max(all_mag)*1.05)
         ax2.set_xlabel(r"Time ($\tau$)")
         ax2.set_ylabel("Magnification")
         ax2.set_title("Light Curve")
@@ -446,12 +484,10 @@ class TwoLens1S:
             tracer_dots.append(dot)
         ax2.legend()
 
-        n_frames = len(self.tau_lc)
-
         image_dots = []
         for system in self.systems:
             system_dots = []
-            for _ in range(5):
+            for _ in range(5): 
                 img_dot, = ax1.plot([], [], '.', color=system['color'], alpha=0.6, markersize=4)
                 system_dots.append(img_dot)
             image_dots.append(system_dots)
@@ -459,14 +495,15 @@ class TwoLens1S:
         def update(i):
             artists = []
             for j, system in enumerate(self.systems):
-                x_s = system['x_src_lc'][i]
-                y_s = system['y_src_lc'][i]
+                x_src = system['x_src'][i]
+                y_src = system['y_src'][i]
 
-                source_dots[j].set_data([x_s], [y_s])
+                source_dots[j].set_data([x_src], [y_src])
                 tracer_dots[j].set_data([self.tau_lc[i]], [system['mag'][i]])
                 artists.extend([source_dots[j], tracer_dots[j]])
+                
+                images = self.VBM.ImageContours(self.s, self.q, x_src, y_src, self.rho)
 
-                images = self.VBM.ImageContours(self.s, self.q, x_s, y_s, self.rho)
                 for k, img_dot in enumerate(image_dots[j]):
                     if k < len(images):
                         img_dot.set_data(images[k][0], images[k][1])
@@ -478,7 +515,7 @@ class TwoLens1S:
 
             return artists
 
-        ani = animation.FuncAnimation(fig, update, frames=n_frames, interval=50, blit=True)
+        ani = animation.FuncAnimation(fig, update, frames=100, interval=50, blit=True)
         plt.close(fig)
         self.last_animation = ani
         return HTML(ani.to_jshtml())
@@ -606,7 +643,7 @@ class TwoLens1S:
     
         #fig.subplots_adjust(hspace=0.2, wspace=0.2)    
 
-        # Animate function
+        # --- Animate function ---
         def update(i):
             artists = []
             for j, system in enumerate(self.systems):
