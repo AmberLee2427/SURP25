@@ -952,31 +952,65 @@ class ThreeLens1S:
 
         return systems
     
-    def plot_caustics_and_critical(self):
+    def plot_caustics_and_critical(self, xlim=None, ylim=None, show=True):
         param = [
             np.log(self.s2), np.log(self.q2), self.u0_list[0], self.alpha_deg,
             np.log(self.rho), np.log(self.tE), self.t0,
             np.log(self.s3), np.log(self.q3), self.psi_rad
         ]
-        _ = self.VBM.TripleLightCurve(param, self.t)  # sets internal lens geometry
+        _ = self.VBM.TripleLightCurve(param, self.t) 
 
         caustics = self.VBM.Multicaustics()
         criticalcurves = self.VBM.Multicriticalcurves()
 
-        plt.figure(figsize=(6, 6))
-        for c in caustics:
-            plt.plot(c[0], c[1], 'r', lw=1.2)
-        for crit in criticalcurves:
-            plt.plot(crit[0], crit[1], 'k--', lw=0.8)
+        fig, ax = plt.subplots(figsize=(10, 10))
 
+        # caustics & critical curves
+        for c in caustics:
+            ax.plot(c[0], c[1], 'r', lw=1.2)
+        for crit in criticalcurves:
+            ax.plot(crit[0], crit[1], 'k--', lw=0.8)
+
+        # lens positions
         lens_pos = self.get_lens_geometry()[1]
         for i in range(0, 6, 2):
-            plt.plot(lens_pos[i], lens_pos[i+1], 'ko')
+            ax.plot(lens_pos[i], lens_pos[i+1], 'ko')
 
-        plt.title("Caustics and Critical Curves (VBM)")
-        plt.gca().set_aspect('equal')
-        plt.grid(True)
-        plt.show()
+        # trajectories
+        for idx, u0 in enumerate(self.u0_list):
+            tau_line = np.linspace(-2, 2, 400)
+            y1s = u0 * np.sin(self.alpha_rad) + tau_line * np.cos(self.alpha_rad)
+            y2s = u0 * np.cos(self.alpha_rad) - tau_line * np.sin(self.alpha_rad)
+
+            # path
+            ax.plot(y1s, y2s, lw=1.6, color=self.colors[idx], label=f'u0={u0:g}')
+
+            # arrow
+            k = len(tau_line) // 2
+            k2 = min(k + 20, len(tau_line) - 1)
+            dx, dy = y1s[k2] - y1s[k], y2s[k2] - y2s[k]
+            ax.quiver(
+                y1s[k], y2s[k], dx, dy,
+                angles='xy', scale_units='xy', scale=1,
+                width=0.004, headwidth=6, headlength=7,
+                color=self.colors[idx]
+            )
+
+        ax.legend()
+        ax.set_aspect('equal')
+        ax.set_title("Caustics and Critical Curves (VBM)")
+        ax.grid(True)
+
+        #optional zoom
+        if xlim is not None:
+            ax.set_xlim(*xlim)
+        if ylim is not None:
+            ax.set_ylim(*ylim)
+
+        if show:
+            plt.show()
+
+        return fig, ax
 
     def plot_light_curve(self):
         plt.figure(figsize=(6, 4))
