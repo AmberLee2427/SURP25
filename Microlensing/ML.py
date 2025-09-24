@@ -88,8 +88,15 @@ class OneL1S:
 
         for idx, u0 in enumerate(self.u0_list):
             color_cs = colors_cs[idx]
+            # For PSPL, VB updates astrometric centroid (astrox1) only when a magnification
+            # function is invoked with astrometry enabled. Compute it per-sample to avoid
+            # stale values and ensure consistency with the light-curve kernel.
             u = np.sqrt(u0**2 + self.tau**2)
-            centroid_shift = [self.VBM.astrox1 - ui for ui in u]
+            centroid_shift = []
+            for ui in u:
+                # This call updates VBM.astrox1 for the current u (PSPL)
+                _ = self.VBM.PSPLMag(ui)
+                centroid_shift.append(self.VBM.astrox1 - ui)
             ax.plot(self.tau, centroid_shift, color=color_cs, label=f'$u_0$ = {u0}')
 
         ax.set_xlabel(r"Time ($\tau$)")
@@ -641,12 +648,14 @@ class ThreeLens1SVBM:
         self.q3 = q3
         self.s12 = s12
         self.s23 = s23
+        # User supplies alpha in degrees; VB expects radians.
         self.alpha = alpha
+        self.alpha_rad = np.radians(self.alpha)
         self.tau = np.linspace(-2, 2, 100)
         self.t = self.t0 + self.tau * self.tE
         self.theta = np.radians(self.alpha)
         self.psi = psi
-        self.phi = np.radians(self.psi)
+        self.phi = np.radians(self.psi)  # psi in degrees -> radians
 
         self.VBM = VBMicrolensing.VBMicrolensing()
         self.VBM.RelTol = 1e-3
@@ -660,13 +669,15 @@ class ThreeLens1SVBM:
     def _prepare_systems(self):
         systems = []
         for u0, color in zip(self.u0_list, self.colors):
+            # Build parameter vector with angles in radians as required by VB
             param_vec = [
-                np.log(self.s12), np.log(self.q2), u0, self.alpha,
+                np.log(self.s12), np.log(self.q2), u0, self.alpha_rad,
                 np.log(self.rho), np.log(self.tE), self.t0,
                 np.log(self.s23), np.log(self.q3), self.phi
             ]
 
-            mag, *_ = self.VBM.TripleLightCurve(param_vec, self.t)
+            # Use VB's returned y1,y2 for the true source trajectory relative to caustics
+            mag, y1, y2 = self.VBM.TripleLightCurve(param_vec, self.t)
 
             x_src = self.tau * np.cos(self.theta) - u0 * np.sin(self.theta)
             y_src = self.tau * np.sin(self.theta) + u0 * np.cos(self.theta)
@@ -675,6 +686,10 @@ class ThreeLens1SVBM:
                 'u0': u0,
                 'color': color,
                 'mag': mag,
+                # VB-provided trajectory (y1,y2) already matches the light curve
+                'y1s': np.asarray(y1),
+                'y2s': np.asarray(y2),
+                # Keep analytic path for reference if needed
                 'x_src': x_src,
                 'y_src': y_src
             })
@@ -682,8 +697,9 @@ class ThreeLens1SVBM:
         return systems
 
     def _setting_parameters(self):
+        # Initialize VB with radians for alpha
         param = [
-            np.log(self.s12), np.log(self.q2), self.u0_list[0], self.alpha,
+            np.log(self.s12), np.log(self.q2), self.u0_list[0], self.alpha_rad,
             np.log(self.rho), np.log(self.tE), self.t0,
             np.log(self.s23), np.log(self.q3), self.phi
         ]
@@ -735,7 +751,8 @@ class ThreeLens1SVBM:
             plt.plot(crit[0], crit[1], 'k--', lw=0.8)
 
         for system in self.systems:
-            plt.plot(system['x_src'], system['y_src'], '--', color=system['color'], alpha=0.6)
+            # Plot the true source path used for light curves
+            plt.plot(system['y1s'], system['y2s'], '--', color=system['color'], alpha=0.6)
 
         lens_positions = self._compute_lens_positions()
         for x, y in lens_positions:
@@ -779,7 +796,7 @@ class ThreeLens1SVBM:
 
         ref_q3 = reference_q3 if reference_q3 is not None else q3_values[0]
         ref_param = [
-            np.log(self.s12), np.log(self.q2), self.u0_list[0], self.alpha,
+            np.log(self.s12), np.log(self.q2), self.u0_list[0], self.alpha_rad,
             np.log(self.rho), np.log(self.tE), self.t0,
             np.log(self.s23), np.log(ref_q3), self.phi
         ]
@@ -788,7 +805,7 @@ class ThreeLens1SVBM:
         for idx, q3 in enumerate(q3_values):
             color = colors[idx]
             param_vec = [
-                np.log(self.s12), np.log(self.q2), self.u0_list[0], self.alpha,
+                np.log(self.s12), np.log(self.q2), self.u0_list[0], self.alpha_rad,
                 np.log(self.rho), np.log(self.tE), self.t0,
                 np.log(self.s23), np.log(q3), self.phi
             ]
@@ -954,7 +971,7 @@ class ThreeLens1S:
     
     def plot_caustics_and_critical(self, xlim=None, ylim=None, show=True):
         param = [
-            np.log(self.s2), np.log(self.q2), self.u0_list[0], self.alpha_deg,
+            np.log(self.s2), np.log(self.q2), self.u0_list[0], self.alpha_rad,
             np.log(self.rho), np.log(self.tE), self.t0,
             np.log(self.s3), np.log(self.q3), self.psi_rad
         ]
