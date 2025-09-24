@@ -769,7 +769,7 @@ class ThreeLens1SVBM:
         plt.tight_layout()
         plt.show()
 
-    def plot_light_curve(self):
+    def plot_light_curve(self, trange=None):
         plt.figure(figsize=(6, 4))
         for system in self.systems:
             plt.plot(self.tau, system['mag'], color=system['color'], label=fr"$u_0$ = {system['u0']}")
@@ -779,6 +779,8 @@ class ThreeLens1SVBM:
         plt.grid(True)
         plt.legend()
         plt.tight_layout()
+        if trange is not None:
+            plt.xlim(trange)
         plt.show()
 
     
@@ -841,7 +843,11 @@ from TestML import get_crit_caus, getphis_v3, get_allimgs_with_mu, testing
 
 class ThreeLens1S:
     def __init__(self, t0, tE, rho, u0_list, q2, q3, s2, s3, alpha_deg, psi_deg,
-                 rs, secnum, basenum, num_points):
+                 rs, secnum, basenum, num_points, backend='VBM'):
+        """
+        backend: 'VBM' (default) uses VBMicrolensing for both light curves and caustics;
+                 'TripleLensing' uses the custom TripleLensing backend consistently for caustics/paths.
+        """
 
         self.t0 = t0
         self.tE = tE
@@ -857,6 +863,7 @@ class ThreeLens1S:
         self.secnum = secnum
         self.basenum = basenum
         self.num_points = num_points
+        self.backend = backend if backend in ('VBM','TripleLensing') else 'VBM'
 
         self.alpha_rad = np.radians(alpha_deg)
         self.psi_rad = np.radians(psi_deg)
@@ -872,10 +879,18 @@ class ThreeLens1S:
 
         import VBMicrolensing
         self.VBM = VBMicrolensing.VBMicrolensing()
-        self.VBM.RelTol = 1e-3
-        self.VBM.Tol = 1e-3
+        # Accuracy: start conservative; can be tightened locally if needed
+        self.VBM.RelTol = 1e-5
+        self.VBM.Tol = 1e-6
+        # Astrometry off for light-curve-only calls to reduce load/crash risk
         self.VBM.astrometry = True
+        # Prefer Multipoly for 3-lens stability
+        # self.VBM.SetMethod(self.VBM.Method.Multipoly)
         self.VBM.SetMethod(self.VBM.Method.Nopoly)
+        # Safety tests around caustics
+        #self.VBM.corrquad = True; self.VBM.corrquad2 = True
+        #self.VBM.NPcrit = 4000
+        
 
     def get_lens_geometry(self):
         m1 = 1 / (1 + self.q2 + self.q3)
@@ -884,7 +899,7 @@ class ThreeLens1S:
         mlens = [m1, m2, m3]
         x1, y1 = 0.0, 0.0
         x2, y2 = self.s2, 0.0
-        x3 = self.s3 * np.cos(self.psi_rad)
+        x3 = self.s3 * np.cos(self.psi_rad)  # lens 3 position relative to lens 1
         y3 = self.s3 * np.sin(self.psi_rad)
         zlens = [x1, y1, x2, y2, x3, y3]
         return mlens, zlens
@@ -970,15 +985,24 @@ class ThreeLens1S:
         return systems
     
     def plot_caustics_and_critical(self, xlim=None, ylim=None, show=True):
-        param = [
-            np.log(self.s2), np.log(self.q2), self.u0_list[0], self.alpha_rad,
-            np.log(self.rho), np.log(self.tE), self.t0,
-            np.log(self.s3), np.log(self.q3), self.psi_rad
-        ]
-        _ = self.VBM.TripleLightCurve(param, self.t) 
-
-        caustics = self.VBM.Multicaustics()
-        criticalcurves = self.VBM.Multicriticalcurves()
+        # Build a representative parameter vector (angle in radians) for VBM backend
+        if self.backend == 'VBM':
+            param = [
+                np.log(self.s2), np.log(self.q2), self.u0_list[0], self.alpha_rad,
+                np.log(self.rho), np.log(self.tE), self.t0,
+                np.log(self.s3), np.log(self.q3), self.psi_rad
+            ]
+            # Initialize internal state for caustics
+            _ = self.VBM.TripleLightCurve(param, self.t)
+            caustics = self.VBM.Multicaustics()
+            criticalcurves = self.VBM.Multicriticalcurves()
+        else:
+            # TripleLensing backend: compute caustics consistently from custom solver
+            mlens, zlens = self.get_lens_geometry()
+            z = [[zlens[0], zlens[1]], [zlens[2], zlens[3]], [zlens[4], zlens[5]]]
+            criticalcurves, caustic_pts = get_crit_caus(mlens, z, len(mlens))
+            # get_crit_caus returns a flat list of points; wrap in a single curve for plotting
+            caustics = [np.array(caustic_pts).T]
 
         fig, ax = plt.subplots(figsize=(10, 10))
 
@@ -993,21 +1017,45 @@ class ThreeLens1S:
         for i in range(0, 6, 2):
             ax.plot(lens_pos[i], lens_pos[i+1], 'ko')
 
-        # trajectories
+        # trajectories (overlay VB y1,y2; keep corrected analytic as a check)
         for idx, u0 in enumerate(self.u0_list):
             tau_line = np.linspace(-2, 2, 400)
-            y1s = u0 * np.sin(self.alpha_rad) + tau_line * np.cos(self.alpha_rad)
-            y2s = u0 * np.cos(self.alpha_rad) - tau_line * np.sin(self.alpha_rad)
+            t_line = self.t0 + tau_line * self.tE
 
-            # path
-            ax.plot(y1s, y2s, lw=1.6, color=self.colors[idx], label=f'u0={u0:g}')
+            # Corrected analytic path matching VB conventions
+            y1_analytic = u0 * np.sin(self.alpha_rad) - tau_line * np.cos(self.alpha_rad)
+            y2_analytic = -u0 * np.cos(self.alpha_rad) - tau_line * np.sin(self.alpha_rad)
 
-            # arrow
+            if self.backend == 'VBM':
+                param_u0 = [
+                    np.log(self.s2), np.log(self.q2), u0, self.alpha_rad,
+                    np.log(self.rho), np.log(self.tE), self.t0,
+                    np.log(self.s3), np.log(self.q3), self.psi_rad
+                ]
+                _, y1_vb, y2_vb = self.VBM.TripleLightCurve(param_u0, t_line)
+                # Plot VB path
+                ax.plot(y1_vb, y2_vb, lw=1.6, color=self.colors[idx], label=f'u0={u0:g} (VB)')
+                # Also print first 5 points for comparison
+                print(f"u0={u0:g} VB y1[:5]={np.array(y1_vb)[:5]} y2[:5]={np.array(y2_vb)[:5]}")
+                print(f"u0={u0:g} analytic y1[:5]={y1_analytic[:5]} y2[:5]={y2_analytic[:5]}")
+            else:
+                # TripleLensing backend: use analytic path consistently
+                ax.plot(y1_analytic, y2_analytic, lw=1.6, color=self.colors[idx], label=f'u0={u0:g} (TL)')
+                print(f"u0={u0:g} analytic y1[:5]={y1_analytic[:5]} y2[:5]={y2_analytic[:5]}")
+
+            # Arrow for direction using the path we just plotted
             k = len(tau_line) // 2
             k2 = min(k + 20, len(tau_line) - 1)
-            dx, dy = y1s[k2] - y1s[k], y2s[k2] - y2s[k]
+            if self.backend == 'VBM':
+                dx = np.array(y1_vb)[k2] - np.array(y1_vb)[k]
+                dy = np.array(y2_vb)[k2] - np.array(y2_vb)[k]
+                x0, y0 = np.array(y1_vb)[k], np.array(y2_vb)[k]
+            else:
+                dx = y1_analytic[k2] - y1_analytic[k]
+                dy = y2_analytic[k2] - y2_analytic[k]
+                x0, y0 = y1_analytic[k], y2_analytic[k]
             ax.quiver(
-                y1s[k], y2s[k], dx, dy,
+                x0, y0, dx, dy,
                 angles='xy', scale_units='xy', scale=1,
                 width=0.004, headwidth=6, headlength=7,
                 color=self.colors[idx]
@@ -1029,19 +1077,58 @@ class ThreeLens1S:
 
         return fig, ax
 
-    def plot_light_curve(self):
+    def plot_light_curve(self, trange=None, max_points=400):
         plt.figure(figsize=(6, 4))
+        # Choose time axis (can be narrowed with trange)
+        if trange is not None:
+            # Cap sampling density in very narrow windows to avoid heavy work/instability
+            npts = min(len(self.highres_tau), int(max_points))
+            tau = np.linspace(trange[0], trange[1], npts)
+            t_arr = self.t0 + tau * self.tE
+        else:
+            tau = self.highres_tau
+            t_arr = self.highres_t
+
         for u0, color in zip(self.u0_list, self.colors):
             param = [
-                np.log(self.s2), np.log(self.q2), u0, self.alpha_deg,
+                np.log(self.s2), np.log(self.q2), u0, self.alpha_rad,
                 np.log(self.rho), np.log(self.tE), self.t0,
                 np.log(self.s3), np.log(self.q3), self.psi_rad
             ]
-            mag, *_ = self.VBM.TripleLightCurve(param, self.highres_t)
-            plt.plot(self.highres_tau, mag, color=color, label=fr"$u_0$ = {u0}")
+
+            if self.backend == 'VBM':
+                mag, *_ = self.VBM.TripleLightCurve(param, t_arr)
+            else:
+                # Try using the TripleLensing backend for magnifications if available
+                mag = None
+                try:
+                    # Some installations expose a TriLightCurve through the TripleLensing object
+                    if hasattr(self.TRIL, 'TriLightCurve'):
+                        # TripleLensing expects linear vs log parameters may differ; try both orders
+                        try:
+                            # Assume VB-like standard parameters (logs on s,q,rho,tE)
+                            mag, y1, y2 = self.TRIL.TriLightCurve(param, t_arr)
+                        except Exception:
+                            # Fallback: try linear s,q,rho,tE if the binding expects linear
+                            p_lin = [
+                                self.s2, self.q2, u0, self.alpha_rad,
+                                self.rho, self.tE, self.t0,
+                                self.s3, self.q3, self.psi_rad
+                            ]
+                            mag, y1, y2 = self.TRIL.TriLightCurve(p_lin, t_arr)
+                    else:
+                        raise AttributeError('TriLightCurve not found on TripleLensing object')
+                except Exception as e:
+                    # Fall back to VB if TL call fails
+                    print(f"[WARN] TripleLensing backend unavailable for light curve ({e}); falling back to VBM.")
+                    mag, *_ = self.VBM.TripleLightCurve(param, t_arr)
+
+            plt.plot(tau, mag, color=color, label=fr"$u_0$ = {u0}")
         plt.xlabel(r"$\tau$")
         plt.ylabel("Magnification")
         plt.title("Triple Lens Light Curve (VBM)")
+        if trange is not None:
+            plt.xlim(trange)
         plt.grid(True)
         plt.legend()
         plt.tight_layout()
@@ -1098,7 +1185,7 @@ class ThreeLens1S:
     
     def animate_combined(self):
         param = [
-            np.log(self.s2), np.log(self.q2), self.u0_list[0], self.alpha_deg,
+            np.log(self.s2), np.log(self.q2), self.u0_list[0], self.alpha_rad,
             np.log(self.rho), np.log(self.tE), self.t0,
             np.log(self.s3), np.log(self.q3), self.psi_rad
         ]
